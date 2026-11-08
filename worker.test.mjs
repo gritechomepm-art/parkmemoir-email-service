@@ -7,7 +7,19 @@ const SERVICE="https://email.parkmemoir.com";
 const SITE="https://parkmemoir.com";
 const db=new DatabaseSync(":memory:");
 db.exec(readFileSync(new URL("./migrations/0001.sql",import.meta.url),"utf8"));
-const D1={prepare(sql){return {bind(...args){const st=db.prepare(sql);return {first:()=>st.get(...args)||null,run:()=>({meta:{changes:Number(st.run(...args).changes)}})};}}};
+const D1 = {
+  prepare(sql) {
+    return {
+      bind(...args) {
+        const st = db.prepare(sql);
+        return {
+          first: () => st.get(...args) || null,
+          run: () => ({meta: {changes: Number(st.run(...args).changes)}}),
+        };
+      },
+    };
+  },
+};
 const env={SUBSCRIBERS:D1,RESEND_API_KEY:"TEST_ONLY",EMAIL_FROM:"PARKMEMOIR <plans@parkmemoir.com>",TURNSTILE_SECRET_KEY:"TEST_ONLY",RATE_HASH_SECRET:"TEST_ONLY",SEASONAL_SEGMENT_ID:"33333333-3333-4333-8333-333333333333"};
 const consentVersion="pm-seasonal-updates-v1-2026-11-08";
 const emails=[],contacts=new Map();let mailFails=false,segmentFails=false;
