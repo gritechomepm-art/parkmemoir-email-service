@@ -40,7 +40,6 @@ function signup(email,token="signup-token"){return {email,turnstileToken:token,c
 function planBody(email){return {requestedOnly:true,email,turnstileToken:"plan-token",pageUrl:SITE+"/which-national-parks-are-open-in-winter/",npsUrl:"https://www.nps.gov/zion/planyourvisit/conditions.htm",plan:{v:1,park:"zion",month:"nov",days:2,stay:"camping",load:["fridge","phones"],recharge:"none",method:"none",vehicleConfirmed:false,portableAway:false,fridgeW:18,fridgeModel:"bodega-t36",fridgePlug:"cigarette",fridgePeak:"",fridgeOwned:"no",unchecked:["warm"],sample:false}};}
 const originally=globalThis.fetch;
 globalThis.fetch=fakeFetch;
-try {
   test("separate Worker rejects non-email host and abusive origins",async()=>{
     const h=await route(new Request(SITE+"/api/send-plan",{method:"POST",headers:{Origin:SITE}}),env);assert.equal(h.status,404);
     assert.equal((await route(post("/api/send-plan",planBody("x@example.com"),"https://evil.example"),env)).status,403);
@@ -130,5 +129,4 @@ try {
     await cleanupExpired(env);
     assert.equal(db.prepare("SELECT count(*) as n FROM pm_seasonal_rate").get().n>0,true);
   });
-}
 after(()=>{globalThis.fetch=originally;});
