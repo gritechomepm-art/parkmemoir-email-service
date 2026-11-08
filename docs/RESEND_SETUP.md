@@ -1,6 +1,6 @@
 # Resend setup — PARKMEMOIR email service
 
-Status: **ACCOUNT SETUP PENDING**. This repository is not currently deployed. Do not claim emails are live merely because GitHub CI passes.
+Status: **RESEND SENDING DOMAIN VERIFIED / WORKER NOT DEPLOYED**. Resend reported `mail.parkmemoir.com` as verified with DKIM TXT, SPF MX, SPF TXT, and CNAME verified on 2026-11-09. This repository is not currently deployed. Do not claim emails are live merely because GitHub CI passes.
 
 ## Goal and boundaries
 
@@ -54,7 +54,7 @@ Official references: https://resend.com/features/audiences ; https://resend.com/
 
 ## 5. Production acceptance checklist
 
-- [ ] Domain sending status is Verified in Resend
+- [x] Domain sending status is Verified in Resend (verified 2026-11-09; no production Worker deployed)
 - [ ] Sending-only restricted API key stored as Cloudflare Worker secret
 - [ ] Worker source, rate limits, validation and idempotency reviewed
 - [ ] Worker staging endpoint deployed and tested without storing transactional recipients
