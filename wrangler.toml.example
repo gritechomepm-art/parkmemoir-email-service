@@ -1,0 +1,25 @@
+# Isolated email Worker; no shared bindings with parkmemoir-public-p0.
+# Candidate only: replace D1 UUID and enable reviewed custom domain before deploy.
+name = "parkmemoir-email"
+main = "worker.mjs"
+compatibility_date = "2026-11-08"
+workers_dev = false
+preview_urls = false
+
+# AFTER APPROVAL, enable this reviewed custom domain:
+# [[routes]]
+# pattern = "email.parkmemoir.com"
+# custom_domain = true
+
+[[d1_databases]]
+binding = "SUBSCRIBERS"
+database_name = "parkmemoir-email-consent"
+database_id = "SET_REAL_D1_DATABASE_ID_AFTER_MIGRATION"
+
+[vars]
+EMAIL_FROM = "PARKMEMOIR <plans@parkmemoir.com>"
+SEASONAL_SEGMENT_ID = "SET_REAL_RESEND_SEGMENT_ID"
+
+# Store only via wrangler secret put: RESEND_API_KEY, TURNSTILE_SECRET_KEY, RATE_HASH_SECRET.
+[triggers]
+crons = ["0 6 * * *"]
