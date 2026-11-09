@@ -73,8 +73,13 @@ async function rate(request,env,category,max) {
   const r=await env.SUBSCRIBERS.prepare("INSERT INTO pm_seasonal_rate(key,day,attempts) VALUES(?,?,1) ON CONFLICT(key) DO UPDATE SET attempts=attempts+1 RETURNING attempts").bind(key,day).first();
   return Boolean(r&&r.attempts<=max);
 }
-async function resend(env,path,method,body) {
-  const response=await fetch("https://api.resend.com"+path,{method,headers:{"Authorization":"Bearer "+env.RESEND_API_KEY,"Content-Type":"application/json"},...(body?{body:JSON.stringify(body)}:{})});
+async function resend(env,path,method,body,{contacts=false,idempotencyKey}={}) {
+  // Sending has a domain-restricted key; marketing Contact/Segment access is a distinct secret.
+  const key=contacts?env.RESEND_CONTACTS_API_KEY:env.RESEND_API_KEY;
+  if(!key)throw Error("Resend credential unavailable");
+  const headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"};
+  if(idempotencyKey)headers["Idempotency-Key"]=idempotencyKey;
+  const response=await fetch("https://api.resend.com"+path,{method,headers,...(body?{body:JSON.stringify(body)}:{})});
   let data={};try{data=await response.json();}catch{}
   return {ok:response.ok,status:response.status,data};
 }
@@ -96,11 +101,15 @@ async function plan(request,env){
   if(!await verified(request,env,d.turnstileToken,"email_plan"))return respond(403,{ok:false,error:"Verification failed"});
   if(!await rate(request,env,"plan",20))return respond(429,{ok:false,error:"Rate limit"});
   const message=planContent(d.plan,packedPlan(d.plan,base),nps);
-  const result=await resend(env,"/emails","POST",{from:env.EMAIL_FROM,to:[d.email.trim().toLowerCase()],...message});
+  const recipient=d.email.trim().toLowerCase();
+  // Resend deduplicates repeated identical requests within 24 hours.
+  // Never put a raw email address or unkeyed identifying hash in request headers.
+  const key="pm-plan-"+await digest([env.RATE_HASH_SECRET,recipient,JSON.stringify(d.plan),base,nps,Math.floor(now()/600)].join("|"));
+  const result=await resend(env,"/emails","POST",{from:env.EMAIL_FROM,to:[recipient],...message},{idempotencyKey:key});
   return result.ok?respond(200,{ok:true,status:"accepted"}):respond(502,{ok:false,error:"Provider did not accept email"});
 }
 async function subscribe(request,env){
-  if(!baseReady(env)||!env.SEASONAL_SEGMENT_ID)return respond(503,{ok:false,error:"Subscription not configured"});
+  if(!baseReady(env)||!env.SEASONAL_SEGMENT_ID||!env.SEASONAL_TOPIC_ID||!env.RESEND_CONTACTS_API_KEY)return respond(503,{ok:false,error:"Subscription not configured"});
   const d=await readJSON(request,4096);
   const email=validEmail(d?.email)?d.email.trim().toLowerCase():null;
   const source=safeWebUrl(d?.sourcePage);
@@ -125,7 +134,7 @@ function landing(request){
 }
 async function confirm(request,env){
   if(request.method==="GET")return landing(request);
-  if(!baseReady(env)||!env.SEASONAL_SEGMENT_ID)return page(503,"Unavailable","<p>Service is not configured.</p>");
+  if(!baseReady(env)||!env.SEASONAL_SEGMENT_ID||!env.SEASONAL_TOPIC_ID||!env.RESEND_CONTACTS_API_KEY)return page(503,"Unavailable","<p>Service is not configured.</p>");
   if(request.headers.get("Origin")!==SERVICE)return page(403,"Not allowed","<p>Invalid request origin.</p>");
   if(!request.headers.get("Content-Type")?.startsWith("application/x-www-form-urlencoded"))return page(415,"Invalid form","<p>Use the confirmation button.</p>");
   const raw=await request.text();if(raw.length>250)return page(413,"Invalid form","<p>Form too large.</p>");
@@ -134,13 +143,18 @@ async function confirm(request,env){
   const row=await env.SUBSCRIBERS.prepare("UPDATE pm_seasonal_consent SET status='confirming',updated_at=? WHERE token_hash=? AND status='pending' AND confirmation_sent_at IS NOT NULL AND expires_at>? RETURNING email").bind(n,th,n).first();
   if(!row)return page(410,"Link unavailable","<p>Expired or already used. Request another link.</p>");
   try{
-    const found=await resend(env,"/contacts/"+encodeURIComponent(row.email),"GET");
+    const found=await resend(env,"/contacts/"+encodeURIComponent(row.email),"GET",undefined,{contacts:true});
     let id;
     if(found.ok){if(found.data.unsubscribed===true)throw Error("unsubscribed");id=found.data.id;}
-    else if(found.status===404){const created=await resend(env,"/contacts","POST",{email:row.email,unsubscribed:false});if(!created.ok)throw Error("provider");id=created.data.id;}
+    else if(found.status===404){const created=await resend(env,"/contacts","POST",{email:row.email,unsubscribed:false}, {contacts:true});if(!created.ok)throw Error("provider");id=created.data.id;}
     else throw Error("lookup");
     if(typeof id!=="string"||!/^[0-9a-f-]{36}$/i.test(id))throw Error("bad ID");
-    const segment=await resend(env,"/contacts/"+encodeURIComponent(id)+"/segments/"+encodeURIComponent(env.SEASONAL_SEGMENT_ID),"POST");
+    // The Resend topic was created with default opt_out, so an affirmative DOI
+    // must explicitly opt the confirmed contact into this topic before segment membership.
+    const topic=await resend(env,"/contacts/"+encodeURIComponent(id)+"/topics","PATCH",
+      [{id:env.SEASONAL_TOPIC_ID,subscription:"opt_in"}],{contacts:true});
+    if(!topic.ok)throw Error("topic");
+    const segment=await resend(env,"/contacts/"+encodeURIComponent(id)+"/segments/"+encodeURIComponent(env.SEASONAL_SEGMENT_ID),"POST",undefined,{contacts:true});
     if(!segment.ok)throw Error("segment");
     const done=await env.SUBSCRIBERS.prepare("UPDATE pm_seasonal_consent SET status='confirmed',token_hash=NULL,confirmed_at=?,contact_id=?,updated_at=? WHERE email=? AND token_hash=? AND status='confirming'").bind(n,id,n,row.email,th).run();
     if(!done.meta?.changes)throw Error("DB");
