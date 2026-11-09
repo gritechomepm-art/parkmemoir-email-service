@@ -132,7 +132,7 @@ globalThis.fetch=fakeFetch;
   test("failed topic opt-in leaves consent pending and outside marketing segment",async()=>{
     const r=await route(post("/api/seasonal-subscribe",signup("topic-failed@example.com"),SITE,"14.14.14.14"),env);
     assert.equal(r.status,202);
-    const token=emails.at(-1).text.match(/seasonal-confirm\\?token=([0-9a-f]{64})/)[1];
+    const token=emails.at(-1).text.match(/seasonal-confirm\?token=([0-9a-f]{64})/)[1];
     const request=()=>new Request(SERVICE+"/api/seasonal-confirm",{method:"POST",headers:{"Origin":SERVICE,"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({token})});
     topicFails=true;
     try{assert.equal((await route(request(),env)).status,503);}
