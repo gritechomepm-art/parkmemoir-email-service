@@ -86,7 +86,7 @@ globalThis.fetch=fakeFetch;
     assert.match(pdf,/xref\n0 \d+/);
     assert.match(pdf,/%%EOF\n$/);
     assert.match(pdf,/National park: zion/);
-    assert.match(pdf,/Official NPS/);
+    assert.match(pdf,/OFFICIAL NPS INFORMATION/);
   });
   test("DOI email remains pending until human POST; a GET does not subscribe",async()=>{
     const r=await route(post("/api/seasonal-subscribe",signup("member@example.com"),SITE,"6.6.6.6"),env);
@@ -120,7 +120,7 @@ globalThis.fetch=fakeFetch;
     const pdf=buildPlanPdf(huge,"https://www.nps.gov/zion/planyourvisit/conditions.htm");
     assert.match(pdf,/^%PDF-1\.4/);
     assert.match(pdf,/\/Count [2-9] /);
-    assert.match(pdf,/step-49-verify-gear-and-conditions/);
+    assert.match(pdf,/step 49 verify gear and conditions/);
     assert.match(pdf,/%%EOF\n$/);
     // All object byte offsets must be within the generated file bounds.
     const offsets=[...pdf.matchAll(/(\d{10}) 00000 n /g)].map(m=>Number(m[1]));
