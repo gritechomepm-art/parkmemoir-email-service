@@ -31,6 +31,7 @@ A controlled local browser rendered the actual saved V12.5 preview, called `befo
 | --- | --- | --- | --- |
 | Zion / January / 4 people / dispersed / fridge | 2 pages / 8 links | 2 pages / 8 links | Full text identical; pixel diff 0 at 120 DPI |
 | Joshua Tree / hotel / lodging offer | 1 page / 6 links | 1 page / 6 links | Full text identical; pixel diff 0 at 120 DPI; **same Stay22 affiliate URL** |
+| Zion / dispersed / Anker power recommendation | 2 pages / 9 links | 2 pages / 9 links | Pixel diff 0; **same Anker PartnerBoost UID and clickable URL** |
 | Affiliate disclosure | present | present | PASS |
 | Actual Resend PDF attachment | not tested | not tested | PENDING |
 | Actual Cloudflare Browser Run | local Chrome proxy only | not tested in Cloudflare | PENDING |
