@@ -29,6 +29,7 @@ const fakeFetch=async(url,opts={})=>{
   if(!u.startsWith("https://api.resend.com"))throw Error("Unexpected fetch "+u);
   const path=u.slice("https://api.resend.com".length),method=opts.method||"GET",body=opts.body?JSON.parse(opts.body):null;
   assert.equal(opts.headers.Authorization,"Bearer "+(path.startsWith("/contacts")?"CONTACTS_TEST_ONLY":"TEST_ONLY"));
+  assert.equal(opts.headers["User-Agent"],"parkmemoir-email-service/1.0");
   if(path==="/emails"){emails.push(body);emailKeys.push(opts.headers["Idempotency-Key"]||null);return Response.json({id:"sent"},{status:mailFails?502:200});}
   if(path==="/contacts"&&method==="POST"){const id="44444444-4444-4444-8444-"+String(contacts.size+1).padStart(12,"0");contacts.set(body.email,{id,email:body.email,unsubscribed:false,segments:new Set(),topics:new Map()});return Response.json({id});}
   if(path.startsWith("/contacts/")&&method==="GET"){const email=decodeURIComponent(path.slice(10)),c=contacts.get(email);return c?Response.json(c):Response.json({error:"not found"},{status:404});}
@@ -37,7 +38,9 @@ const fakeFetch=async(url,opts={})=>{
     if(topicFails)return Response.json({error:"topic error"},{status:503});
     const c=[...contacts.values()].find(x=>x.id===decodeURIComponent(topic[1]));assert.ok(c);
     c.topics??=new Map();
-    for(const t of body)c.topics.set(t.id,t.subscription);
+    assert.deepEqual(Object.keys(body),["topics"]);
+    assert.equal(Array.isArray(body.topics),true);
+    for(const t of body.topics)c.topics.set(t.id,t.subscription);
     return Response.json({object:"contact_topics"});
   }
   const m=path.match(/^\/contacts\/([^/]+)\/segments\/([^/]+)$/);
