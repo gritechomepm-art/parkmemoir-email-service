@@ -10,7 +10,7 @@ const required=[
   ["RESEND_API_KEY","secret_text"],["RESEND_CONTACTS_API_KEY","secret_text"],
   ["SEASONAL_SEGMENT_ID","plain_text"],["SEASONAL_TOPIC_ID","plain_text"],
   ["TURNSTILE_SECRET_KEY","secret_text"],["SUBSCRIBERS","d1"],
-  ["BROWSER","browser_rendering"]
+  ["BROWSER","browser"]
 ].map(([name,type])=>({name,type}));
 test("requires one 100% deployed Worker",()=>{
   assert.equal(liveVersion({deployments:[{versions:[{version_id:previous,percentage:100}]}]}),previous);
@@ -21,6 +21,7 @@ test("checks names, secret type, D1 and Browser Run without reading private valu
   assert.equal(names.length,9);
   assert.equal(uploadMetadata(names,sha).bindings.every(x=>x.type==="inherit"),true);
   assert.throws(()=>bindingNames(required.filter(x=>x.name!=="BROWSER")),/BROWSER/);
+  assert.throws(()=>bindingNames(required.map(x=>x.name==="BROWSER"?{...x,type:"plain_text"}:x)),/Browser Run/);
   assert.throws(()=>bindingNames(required.map(x=>x.name==="SUBSCRIBERS"?{...x,type:"plain_text"}:x)),/D1/);
   assert.throws(()=>bindingNames(required.map(x=>x.name==="RESEND_API_KEY"?{...x,type:"plain_text"}:x)),/secret/);
   assert.throws(()=>bindingNames([...required,required[0]]),/Duplicate/);
