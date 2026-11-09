@@ -12,7 +12,8 @@ This repository is the **isolated** service for PARKMEMOIR's optional email feat
 - \`POST /api/seasonal-confirm\`: explicit confirmation; check global unsubscribe suppression, add Resend Contact to the configured Segment, record D1 confirmation.
 - IP-hash daily throttling, restricted site origins, exact host routing, idempotent plan sends, dedicated consent D1 and scheduled cleanup.
 - Sending and Contacts API keys are separated; opt-in Topic remains default-off until an explicit confirmation POST.
-- `GET /health`: non-sending binding-presence check, which does not validate actual delivery or D1 contents.
+- `GET /health`: non-sending binding-presence check (including `BROWSER`), which does not validate actual delivery or D1 contents.
+- `client/full-print-snapshot.mjs`: browser-side adapter for a **future, separate** main-site integration PR; preserves the canonical print DOM and dynamic links. The main public site does **not** yet run the full planner. No reduced email-only PDF is generated.
 - Absolutely no Digital Companion storage, existing marketing Worker bindings or changes to PARKMEMOIR's production UI.
 
 **Service host:** \`email.parkmemoir.com\`. Only \`https://parkmemoir.com\` and \`https://www.parkmemoir.com\` may call the public CORS endpoints.
@@ -25,6 +26,9 @@ worker.test.mjs             mocked Resend, Turnstile and D1 semantics
 migrations/0001.sql         isolated consent and rate-limit tables
 wrangler.toml.example       intentionally non-deployable sample
 .github/workflows/ci.yml   source-only tests; NEVER deploys
+client/full-print-snapshot.mjs   canonical V12.5 print DOM browser adapter
+client/full-print-snapshot.test.mjs  adapter source-only tests
+docs/FULL_PDF_PARITY_GATE.md      full PDF quality and Cloudflare Browser Run gate
 docs/MANUAL_SETUP.md        owner setup and release gates
 docs/DASHBOARD_DEPLOY_CHECKLIST.md  dashboard-only source-to-deploy procedure
 \`\`\`

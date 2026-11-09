@@ -11,6 +11,11 @@ preview_urls = false
 # pattern = "email.parkmemoir.com"
 # custom_domain = true
 
+# Complete PDF rendering of the existing browser print DOM, via Cloudflare Browser Run.
+# Available on Workers Free with a daily browser-time quota.
+[browser]
+binding = "BROWSER"
+
 [[d1_databases]]
 binding = "SUBSCRIBERS"
 database_name = "parkmemoir-email-consent"

@@ -23,5 +23,7 @@ jobs:
         run: |
           node --check worker.mjs
           node --check worker.test.mjs
+          node --check client/full-print-snapshot.mjs
+          node --check client/full-print-snapshot.test.mjs
       - name: Mocked email + DOI tests (no credentials)
-        run: node --test worker.test.mjs
+        run: node --test worker.test.mjs client/full-print-snapshot.test.mjs

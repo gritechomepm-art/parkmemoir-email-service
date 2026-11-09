@@ -84,27 +84,83 @@ async function resend(env,path,method,body,{contacts=false,idempotencyKey}={}) {
   return {ok:response.ok,status:response.status,data};
 }
 function baseReady(env){return Boolean(env.RESEND_API_KEY&&env.EMAIL_FROM&&env.TURNSTILE_SECRET_KEY&&env.SUBSCRIBERS&&env.RATE_HASH_SECRET);}
-function packedPlan(p,base){
-  const u=new URL(base),raw=btoa(JSON.stringify(p)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");
-  u.searchParams.set("plan",raw);if(p.load.includes("fridge"))u.searchParams.set("intent","fridge");return u.href;
+
+// The complete printable report must come from the existing Winter Planner's
+// preparePrint() DOM. The Worker never reconstructs a reduced PDF from plan fields.
+const FULL_PRINT_VERSION="winter-full-print-v12.5";
+function validPrintSnapshot(s){
+  if(!s||typeof s!=="object"||Array.isArray(s)||s.version!==FULL_PRINT_VERSION)return false;
+  if(typeof s.markup!=="string"||s.markup.length<200||s.markup.length>160000)return false;
+  if(typeof s.css!=="string"||s.css.length<100||s.css.length>100000)return false;
+  // The source is the existing complete #print-plan subtree and the site's
+  // print stylesheet, not a separately written report.
+  if(!/id=["']print-plan["']/i.test(s.markup))return false;
+  for(const label of ["Access &amp; stay notes","Your packing checklist","Recommended products","Affiliate disclosure"]){
+    if(!s.markup.includes(label))return false;
+  }
+  const riskyMarkup=/<\s*\/?\s*(?:script|iframe|frame|object|embed|link|meta|base|form|video|audio)\b|on[a-z]{3,}\s*=|javascript\s*:|data\s*:\s*text\/html/i;
+  if(riskyMarkup.test(s.markup))return false;
+  if(/<\s*\/?\s*style\b/i.test(s.markup))return false;
+  // Block arbitrary network-backed resources from user-supplied markup/CSS.
+  if(/url\s*\(\s*["']?\s*(?:https?:|\/\/)/i.test(s.css+s.markup))return false;
+  if(/@import\b|<\/style|<\/head|<\/body|<html\b/i.test(s.css))return false;
+  const srcs=[...s.markup.matchAll(/<img\b[^>]*?\bsrc=["']([^"']+)["']/gi)];
+  if(srcs.some(m=>!/^data:image\/(?:png|webp|jpeg);base64,[A-Za-z0-9+/=]+$/i.test(m[1])))return false;
+  return true;
 }
-function planContent(p,link,nps){
-  const body=["Your saved Trip & Power Plan","Park: "+p.park.replace(/-/g," "),"Month: "+p.month,"Days: "+p.days,"Stay: "+p.stay,"Devices: "+(p.load.join(", ")||"none"),"12V fridge average: "+p.fridgeW+"W (illustrative, not measured)","Fridge: "+p.fridgeModel,"Startup peak: "+(p.fridgePeak===""?"not confirmed":p.fridgePeak+"W"),"Your saved trip and printable PDF: "+link,"Official NPS conditions: "+nps,"Checklist items marked off: "+(p.unchecked.join(", ")||"none"),"Verify roads, legal camping, loads, compatible cables, charging and weather before departure.","This one-time email did not subscribe you to marketing."].join("\n\n");
-  return {subject:"Your PARKMEMOIR Trip & Power Plan",text:body,html:'<main style="max-width:620px;padding:20px;font:16px/1.6 system-ui"><h1>Your saved Trip &amp; Power Plan</h1><p>'+esc(p.days+" days · "+p.park+" · "+p.stay)+'</p><p>Devices: '+esc(p.load.join(", ")||"none")+'</p><p>Estimated fridge average: '+esc(p.fridgeW)+' W (illustrative)</p><p><a href="'+esc(link)+'">Open plan and print PDF</a></p><p><a href="'+esc(nps)+'">Official NPS road and park information</a></p><p>Checklist marked off: '+esc(p.unchecked.join(", ")||"none")+'</p><p style="font-size:12px">You requested this one-time email. No marketing subscription was created. Battery runtime and access are not guaranteed.</p></main>'};
+function buildPrintableHtml(s){
+  return '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>'+
+    s.css+'</style></head><body>'+s.markup+'</body></html>';
+}
+function encodeBase64Bytes(bytes){
+  let binary="";
+  for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+  return btoa(binary);
+}
+export async function renderFullPrintPdf(env,snapshot){
+  if(!validPrintSnapshot(snapshot)||!env.BROWSER?.quickAction)throw Error("full print report unavailable");
+  const response=await env.BROWSER.quickAction("pdf",{
+    html:buildPrintableHtml(snapshot),
+    pdfOptions:{format:"a4",printBackground:true,preferCSSPageSize:true},
+    // Links remain clickable in PDF; no external resources are fetched.
+    rejectRequestPattern:["/^https?:\\/\\//"],
+  });
+  if(!response.ok)throw Error("PDF renderer unavailable");
+  const bytes=new Uint8Array(await response.arrayBuffer());
+  if(bytes.length<500||bytes.length>5*1024*1024)throw Error("invalid PDF size");
+  const header=new TextDecoder("latin1").decode(bytes.subarray(0,8));
+  const tail=new TextDecoder("latin1").decode(bytes.subarray(Math.max(0,bytes.length-1024)));
+  if(!header.startsWith("%PDF-")||!tail.includes("%%EOF"))throw Error("invalid PDF bytes");
+  return {filename:"PARKMEMOIR_Full_Winter_Trip_Plan.pdf",content:encodeBase64Bytes(bytes)};
+}
+function planContent(p,nps){
+  const body=[
+    "Your complete PARKMEMOIR winter trip planner PDF is attached.",
+    "Park: "+p.park.replace(/-/g," "),"Month: "+p.month,"Days: "+p.days,"Stay: "+p.stay,
+    "The attached document includes the full trip and access notes, packing checklist, matched product/booking links, and affiliate disclosure.",
+    "Official NPS information: "+nps,
+    "Check live road and campground status, weather, and product specifications before you travel.",
+    "This one-time email did not subscribe you to marketing."
+  ].join("\n\n");
+  return {subject:"Your full PARKMEMOIR Winter Trip Plan (PDF attached)",text:body,
+    html:'<main style="max-width:620px;padding:20px;font:16px/1.6 system-ui"><h1>Your complete winter trip PDF is attached</h1><p>'+esc(p.days+" days | "+p.park+" | "+p.stay)+'</p><p>This is your complete printable plan with personalized access information, packing checklist, equipment and booking recommendations, and affiliate disclosure. No old website print link is needed.</p><p><a href="'+esc(nps)+'">Official NPS information</a></p><p style="font-size:12px">One-time email only; no marketing subscription. Always verify current conditions.</p></main>'};
 }
 async function plan(request,env){
   if(!baseReady(env))return respond(503,{ok:false,error:"Email service not configured"});
-  const d=await readJSON(request);
+  const d=await readJSON(request,350000);
   if(!d||d.requestedOnly!==true||!validEmail(d.email)||!validPlan(d.plan))return respond(400,{ok:false,error:"Invalid plan"});
+  if(!validPrintSnapshot(d.printSnapshot))return respond(400,{ok:false,error:"Complete printable report required"});
   const base=safeWebUrl(d.pageUrl),nps=safeWebUrl(d.npsUrl,true);
   if(!base||!nps)return respond(400,{ok:false,error:"Invalid URL"});
   if(!await verified(request,env,d.turnstileToken,"email_plan"))return respond(403,{ok:false,error:"Verification failed"});
   if(!await rate(request,env,"plan",20))return respond(429,{ok:false,error:"Rate limit"});
-  const message=planContent(d.plan,packedPlan(d.plan,base),nps);
+  const message=planContent(d.plan,nps);
+  const pdf=await renderFullPrintPdf(env,d.printSnapshot);
+  message.attachments=[pdf];
   const recipient=d.email.trim().toLowerCase();
   // Resend deduplicates repeated identical requests within 24 hours.
   // Never put a raw email address or unkeyed identifying hash in request headers.
-  const key="pm-plan-"+await digest([env.RATE_HASH_SECRET,recipient,JSON.stringify(d.plan),base,nps,Math.floor(now()/600)].join("|"));
+  const key="pm-full-print-v125-"+await digest(["full-print-v12.5",env.RATE_HASH_SECRET,recipient,JSON.stringify(d.plan),d.printSnapshot.markup,d.printSnapshot.css,Math.floor(now()/600)].join("|"));
   const result=await resend(env,"/emails","POST",{from:env.EMAIL_FROM,to:[recipient],...message},{idempotencyKey:key});
   return result.ok?respond(200,{ok:true,status:"accepted"}):respond(502,{ok:false,error:"Provider did not accept email"});
 }
@@ -135,40 +191,59 @@ function landing(request){
 async function confirm(request,env){
   if(request.method==="GET")return landing(request);
   if(!baseReady(env)||!env.SEASONAL_SEGMENT_ID||!env.SEASONAL_TOPIC_ID||!env.RESEND_CONTACTS_API_KEY)return page(503,"Unavailable","<p>Service is not configured.</p>");
-  if(request.headers.get("Origin")!==SERVICE)return page(403,"Not allowed","<p>Invalid request origin.</p>");
+  // Email in-app browsers may omit Origin on same-origin form submissions.
+  // The 256-bit email-only token is the actual confirmation proof.
+  const origin=request.headers.get("Origin");
+  const fetchSite=request.headers.get("Sec-Fetch-Site");
+  if((origin&&origin!==SERVICE)||(fetchSite&&fetchSite==="cross-site"))
+    return page(403,"Not allowed","<p>Open the email link and use its confirmation button.</p>");
   if(!request.headers.get("Content-Type")?.startsWith("application/x-www-form-urlencoded"))return page(415,"Invalid form","<p>Use the confirmation button.</p>");
   const raw=await request.text();if(raw.length>250)return page(413,"Invalid form","<p>Form too large.</p>");
   const token=new URLSearchParams(raw).get("token");if(!validToken(token))return page(400,"Invalid link","<p>Request a new link.</p>");
   const th=await digest(token),n=now();
-  const row=await env.SUBSCRIBERS.prepare("UPDATE pm_seasonal_consent SET status='confirming',updated_at=? WHERE token_hash=? AND status='pending' AND confirmation_sent_at IS NOT NULL AND expires_at>? RETURNING email").bind(n,th,n).first();
-  if(!row)return page(410,"Link unavailable","<p>Expired or already used. Request another link.</p>");
+  let row;
+  try {
+    row=await env.SUBSCRIBERS.prepare("UPDATE pm_seasonal_consent SET status='confirming',updated_at=? WHERE token_hash=? AND status='pending' AND confirmation_sent_at IS NOT NULL AND expires_at>? RETURNING email").bind(n,th,n).first();
+  } catch {
+    console.error("DOI_CONFIRM_FAILED:consent_lookup");
+    return page(503,"Subscription unavailable","<p>Could not check confirmation status. Please retry.</p>");
+  }
+  if(!row)return page(410,"Link unavailable","<p>Link expired, already used, or no confirmation email was recorded. Request a new confirmation email.</p>");
+  let stage="contact_lookup";
   try{
     const found=await resend(env,"/contacts/"+encodeURIComponent(row.email),"GET",undefined,{contacts:true});
     let id;
     if(found.ok){if(found.data.unsubscribed===true)throw Error("unsubscribed");id=found.data.id;}
-    else if(found.status===404){const created=await resend(env,"/contacts","POST",{email:row.email,unsubscribed:false}, {contacts:true});if(!created.ok)throw Error("provider");id=created.data.id;}
+    else if(found.status===404){stage="contact_create";const created=await resend(env,"/contacts","POST",{email:row.email,unsubscribed:false}, {contacts:true});if(!created.ok)throw Error("provider");id=created.data.id;}
     else throw Error("lookup");
     if(typeof id!=="string"||!/^[0-9a-f-]{36}$/i.test(id))throw Error("bad ID");
     // The Resend topic was created with default opt_out, so an affirmative DOI
     // must explicitly opt the confirmed contact into this topic before segment membership.
+    stage="topic_opt_in";
     const topic=await resend(env,"/contacts/"+encodeURIComponent(id)+"/topics","PATCH",
       {topics:[{id:env.SEASONAL_TOPIC_ID,subscription:"opt_in"}]},{contacts:true});
     if(!topic.ok)throw Error("topic");
+    stage="segment_add";
     const segment=await resend(env,"/contacts/"+encodeURIComponent(id)+"/segments/"+encodeURIComponent(env.SEASONAL_SEGMENT_ID),"POST",undefined,{contacts:true});
     if(!segment.ok)throw Error("segment");
+    stage="consent_commit";
     const done=await env.SUBSCRIBERS.prepare("UPDATE pm_seasonal_consent SET status='confirmed',token_hash=NULL,confirmed_at=?,contact_id=?,updated_at=? WHERE email=? AND token_hash=? AND status='confirming'").bind(n,id,n,row.email,th).run();
     if(!done.meta?.changes)throw Error("DB");
     return page(200,"Subscription confirmed","<p>Thank you. You can unsubscribe from any seasonal email. Trip plan emails remain separate.</p>");
   }catch{
-    await env.SUBSCRIBERS.prepare("UPDATE pm_seasonal_consent SET status='pending',updated_at=? WHERE email=? AND token_hash=? AND status='confirming'").bind(now(),row.email,th).run();
-    return page(503,"Confirmation incomplete","<p>We could not complete your subscription. Retry the confirmation link.</p>");
+    // Record a stage identifier only; never log email address, token, credentials or provider response.
+    console.error("DOI_CONFIRM_FAILED:"+stage);
+    try {
+      await env.SUBSCRIBERS.prepare("UPDATE pm_seasonal_consent SET status='pending',updated_at=? WHERE email=? AND token_hash=? AND status='confirming'").bind(now(),row.email,th).run();
+    }catch{console.error("DOI_CONFIRM_FAILED:consent_rollback");}
+    return page(503,"Confirmation incomplete","<p>Your subscription could not be completed. Retry this link or contact the site owner.</p>");
   }
 }
 async function execute(request,env) {
   const pathname=new URL(request.url).pathname;
   if(pathname==="/health" && request.method==="GET") {
     // Binding presence only: no mail, database reads, or private values are exposed.
-    const configured=baseReady(env) && Boolean(env.RESEND_CONTACTS_API_KEY&&env.SEASONAL_SEGMENT_ID&&env.SEASONAL_TOPIC_ID);
+    const configured=baseReady(env) && Boolean(env.RESEND_CONTACTS_API_KEY&&env.SEASONAL_SEGMENT_ID&&env.SEASONAL_TOPIC_ID&&env.BROWSER?.quickAction);
     return respond(configured?200:503,{ok:configured,service:"parkmemoir-email",status:configured?"configured":"missing_config"});
   }
   if(request.method==="OPTIONS") {
