@@ -12,6 +12,7 @@ This repository is the **isolated** service for PARKMEMOIR's optional email feat
 - \`POST /api/seasonal-confirm\`: explicit confirmation; check global unsubscribe suppression, add Resend Contact to the configured Segment, record D1 confirmation.
 - IP-hash daily throttling, restricted site origins, exact host routing, idempotent plan sends, dedicated consent D1 and scheduled cleanup.
 - Sending and Contacts API keys are separated; opt-in Topic remains default-off until an explicit confirmation POST.
+- `GET /health`: non-sending binding-presence check, which does not validate actual delivery or D1 contents.
 - Absolutely no Digital Companion storage, existing marketing Worker bindings or changes to PARKMEMOIR's production UI.
 
 **Service host:** \`email.parkmemoir.com\`. Only \`https://parkmemoir.com\` and \`https://www.parkmemoir.com\` may call the public CORS endpoints.
@@ -24,7 +25,8 @@ worker.test.mjs             mocked Resend, Turnstile and D1 semantics
 migrations/0001.sql         isolated consent and rate-limit tables
 wrangler.toml.example       intentionally non-deployable sample
 .github/workflows/ci.yml   source-only tests; NEVER deploys
-docs/MANUAL_SETUP.md        exact account-owner setup and gates
+docs/MANUAL_SETUP.md        owner setup and release gates
+docs/DASHBOARD_DEPLOY_CHECKLIST.md  dashboard-only source-to-deploy procedure
 \`\`\`
 
 ## Local and GitHub CI
