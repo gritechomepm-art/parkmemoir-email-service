@@ -32,7 +32,7 @@ export function bindingNames(bindings){
   }
   for(const name of REQUIRED)if(!names.has(name))throw Error("Required Worker binding missing: "+name);
   if(types.get("SUBSCRIBERS")!=="d1")throw Error("SUBSCRIBERS must be existing D1");
-  if(types.get("BROWSER")!=="browser_rendering")throw Error("BROWSER must be Browser Run");
+  if(types.get("BROWSER")!=="browser")throw Error("BROWSER must be Browser Run");
   for(const name of ["RESEND_API_KEY","RESEND_CONTACTS_API_KEY","RATE_HASH_SECRET","TURNSTILE_SECRET_KEY"])
     if(!["secret_text","secret_key"].includes(types.get(name)))throw Error("Required secret binding type mismatch: "+name);
   return [...names].sort();
