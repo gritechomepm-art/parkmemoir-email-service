@@ -69,16 +69,20 @@ export async function deploy({token,account,sha,fetcher=fetch,source}){
     return j.result;
   };
   const existing=liveVersion(await api("GET","/deployments"));
-  const settings=await api("GET","/settings");
-  const names=bindingNames(settings?.bindings);
-  if(settings?.compatibility_date && settings.compatibility_date>"2026-11-09")
+  // Read the exact deployed version, not just generic Worker settings.
+  // Cloudflare GET /settings may omit resource bindings; a deployed Version
+  // exposes the source of truth at resources.bindings.
+  const current=await api("GET","/versions/"+existing);
+  const names=bindingNames(current?.resources?.bindings);
+  const date=current?.resources?.script_runtime?.compatibility_date;
+  if(date && String(date).slice(0,10)>"2026-11-09")
     throw Error("Current Worker compatibility date is newer than reviewed build");
   const versions=await api("GET","/versions?per_page=1");
   if(lastUploadedVersion(versions)!==existing)
     throw Error("Unpublished Worker version exists: cannot safely inherit bindings");
   // No remote mutation occurs until all preflight checks above pass.
   const form=new FormData();
-  form.append("metadata",new Blob([JSON.stringify(uploadMetadata(names,sha))],{type:"application/json"}),"metadata.json");
+  form.append("metadata",JSON.stringify(uploadMetadata(names,sha)));
   form.append("worker.mjs",new Blob([source],{type:"application/javascript+module"}),"worker.mjs");
   const next=await api("POST","/versions?bindings_inherit=strict",form);
   const version=next?.id;
