@@ -2,7 +2,7 @@
 # Candidate only: replace D1 UUID and enable reviewed custom domain before deploy.
 name = "parkmemoir-email"
 main = "worker.mjs"
-compatibility_date = "2026-11-08"
+compatibility_date = "2026-11-09"
 workers_dev = false
 preview_urls = false
 
@@ -17,9 +17,11 @@ database_name = "parkmemoir-email-consent"
 database_id = "SET_REAL_D1_DATABASE_ID_AFTER_MIGRATION"
 
 [vars]
-EMAIL_FROM = "PARKMEMOIR <plans@parkmemoir.com>"
+EMAIL_FROM = "PARKMEMOIR <plans@mail.parkmemoir.com>"
 SEASONAL_SEGMENT_ID = "SET_REAL_RESEND_SEGMENT_ID"
+SEASONAL_TOPIC_ID = "SET_REAL_RESEND_TOPIC_ID"
 
-# Store only via wrangler secret put: RESEND_API_KEY, TURNSTILE_SECRET_KEY, RATE_HASH_SECRET.
+# Worker Secrets (not vars): RESEND_API_KEY (sending-only, domain-limited), RESEND_CONTACTS_API_KEY (separate full-access for DOI), TURNSTILE_SECRET_KEY, RATE_HASH_SECRET.
+# CAUTION: `wrangler secret put` deploys immediately. Use dashboard or `wrangler versions secret put` during staged setup.
 [triggers]
 crons = ["0 6 * * *"]
