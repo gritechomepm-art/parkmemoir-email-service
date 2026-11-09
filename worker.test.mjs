@@ -52,6 +52,16 @@ function signup(email,token="signup-token"){return {email,turnstileToken:token,c
 function planBody(email){return {requestedOnly:true,email,turnstileToken:"plan-token",pageUrl:SITE+"/which-national-parks-are-open-in-winter/",npsUrl:"https://www.nps.gov/zion/planyourvisit/conditions.htm",plan:{v:1,park:"zion",month:"nov",days:2,stay:"camping",load:["fridge","phones"],recharge:"none",method:"none",vehicleConfirmed:false,portableAway:false,fridgeW:18,fridgeModel:"bodega-t36",fridgePlug:"cigarette",fridgePeak:"",fridgeOwned:"no",unchecked:["warm"],sample:false}};}
 const originally=globalThis.fetch;
 globalThis.fetch=fakeFetch;
+  test("health reports binding configuration without sending or exposing secrets",async()=>{
+    const before=emails.length;
+    const ok=await route(new Request(SERVICE+"/health"),env);
+    assert.equal(ok.status,200);
+    assert.deepEqual(await ok.json(),{ok:true,service:"parkmemoir-email",status:"configured"});
+    const missing=await route(new Request(SERVICE+"/health"),{...env,RESEND_API_KEY:""});
+    assert.equal(missing.status,503);
+    assert.deepEqual(await missing.json(),{ok:false,service:"parkmemoir-email",status:"missing_config"});
+    assert.equal(emails.length,before);
+  });
   test("separate Worker rejects non-email host and abusive origins",async()=>{
     const h=await route(new Request(SITE+"/api/send-plan",{method:"POST",headers:{Origin:SITE}}),env);assert.equal(h.status,404);
     assert.equal((await route(post("/api/send-plan",planBody("x@example.com"),"https://evil.example"),env)).status,403);
