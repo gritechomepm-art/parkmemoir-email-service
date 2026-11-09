@@ -78,7 +78,7 @@ globalThis.fetch=fakeFetch;
     assert.equal(contacts.size,0);assert.equal(emails.length,1);
     assert.match(emails[0].text,/Official NPS/);assert.match(emails[0].text,/not subscribe/);
     assert.doesNotMatch(emails[0].text,/plan@example.com/);
-    assert.match(emails[0].text,/PDF is attached/);
+    assert.match(emails[0].text,/attached as a PDF/);
     assert.doesNotMatch(emails[0].text,/Open plan and print PDF/);
     assert.equal(emails[0].attachments[0].filename,"PARKMEMOIR_Trip_and_Power_Plan.pdf");
     const pdf=atob(emails[0].attachments[0].content);
