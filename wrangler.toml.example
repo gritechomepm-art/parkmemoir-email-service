@@ -21,6 +21,10 @@ EMAIL_FROM = "PARKMEMOIR <plans@mail.parkmemoir.com>"
 SEASONAL_SEGMENT_ID = "SET_REAL_RESEND_SEGMENT_ID"
 SEASONAL_TOPIC_ID = "SET_REAL_RESEND_TOPIC_ID"
 
+# Never commit secret VALUES. Validate secret names before source-based upload/deploy.
+[secrets]
+required = ["RESEND_API_KEY", "RESEND_CONTACTS_API_KEY", "TURNSTILE_SECRET_KEY", "RATE_HASH_SECRET"]
+
 # Worker Secrets (not vars): RESEND_API_KEY (sending-only, domain-limited), RESEND_CONTACTS_API_KEY (separate full-access for DOI), TURNSTILE_SECRET_KEY, RATE_HASH_SECRET.
 # CAUTION: `wrangler secret put` deploys immediately. Use dashboard or `wrangler versions secret put` during staged setup.
 [triggers]
