@@ -86,7 +86,7 @@ export async function deploy({token,account,sha,fetcher=fetch,source}){
 
   // Verify binding names/types on newly uploaded version before switching traffic.
   const uploaded=await api("GET","/versions/"+version);
-  const nextNames=bindingNames(uploaded?.bindings);
+  const nextNames=bindingNames(uploaded?.resources?.bindings);
   if(names.join("\n")!==nextNames.join("\n"))throw Error("Uploaded version binding set changed");
 
   // Compare-and-swap: refuse to replace a Worker deployed by someone else.
