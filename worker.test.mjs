@@ -120,6 +120,15 @@ globalThis.fetch=fakeFetch;
     assert.match(browserCalls[0].args.html,/pboost.me\/sample/);
     assert.equal(browserCalls[0].args.pdfOptions.format,"a4");
   });
+  test("accepts the one-day recharge interval exposed by the V12.5 numeric control",async()=>{
+    const body=planBody("one-day@example.com");
+    body.plan.recharge="1";
+    const before=emails.length;
+    const r=await route(post("/api/send-plan",body,SITE,"18.18.18.18"),env);
+    assert.equal(r.status,200);
+    assert.equal(emails.length,before+1);
+    assert.equal(emails.at(-1).attachments[0].filename,"PARKMEMOIR_Full_Winter_Trip_Plan.pdf");
+  });
   test("DOI email remains pending until human POST; a GET does not subscribe",async()=>{
     const r=await route(post("/api/seasonal-subscribe",signup("member@example.com"),SITE,"6.6.6.6"),env);
     assert.equal(r.status,202);assert.equal(contacts.size,0);
