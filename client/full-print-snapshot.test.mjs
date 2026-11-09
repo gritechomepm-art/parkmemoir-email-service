@@ -43,6 +43,7 @@ test("payload preserves the canonical print DOM and normalized planner state",()
   assert.equal(payload.plan.stay,"dispersed");
   assert.deepEqual(payload.plan.load,["phones","fridge"]);
   assert.equal(payload.plan.days,4);
+  assert.equal(payload.plan.recharge,"3");
   assert.equal(payload.plan.fridgeW,18);
   assert.equal(payload.plan.method,"none");
   assert.equal(payload.npsUrl,"https://www.nps.gov/zion/planyourvisit/conditions.htm");
