@@ -1,6 +1,6 @@
 # PARKMEMOIR Email Service
 
-**Status: candidate code only — no Cloudflare deployment, DNS change, live Resend configuration or production launch.**
+**Status: candidate code only — sending domain verified 2026-11-09; no Cloudflare Worker deployment, real inbox test or production launch.**
 
 This repository is the **isolated** service for PARKMEMOIR's optional email features. Migrated from [PARKMEMOIR PR #38](https://github.com/gritechomepm-art/parkmemoir/pull/38) after its public-site static-only release gate rejected unrelated backend files. Never weaken or remove protections from the main PARKMEMOIR repository.
 
@@ -10,7 +10,8 @@ This repository is the **isolated** service for PARKMEMOIR's optional email feat
 - \`POST /api/seasonal-subscribe\`: **separate affirmative consent**, Turnstile, D1 pending proof, 48-hour confirmation email; no Resend marketing Contact yet.
 - \`GET /api/seasonal-confirm?token=...\`: view only, never subscribes.
 - \`POST /api/seasonal-confirm\`: explicit confirmation; check global unsubscribe suppression, add Resend Contact to the configured Segment, record D1 confirmation.
-- IP-hash daily throttling, restricted site origins, exact host routing, dedicated consent D1 and scheduled cleanup.
+- IP-hash daily throttling, restricted site origins, exact host routing, idempotent plan sends, dedicated consent D1 and scheduled cleanup.
+- Sending and Contacts API keys are separated; opt-in Topic remains default-off until an explicit confirmation POST.
 - Absolutely no Digital Companion storage, existing marketing Worker bindings or changes to PARKMEMOIR's production UI.
 
 **Service host:** \`email.parkmemoir.com\`. Only \`https://parkmemoir.com\` and \`https://www.parkmemoir.com\` may call the public CORS endpoints.
