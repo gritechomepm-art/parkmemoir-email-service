@@ -46,13 +46,13 @@ function fakeCloudflare({health=true,bindingList=required,latest=previous,rollBa
       if(rollBackFails&&id===previous)return result({success:false},403);
       deployed=id;return result({success:true,result:{versions:body.versions}});
     }
-    if(u.pathname.endsWith("/settings"))return result({success:true,result:{bindings:bindingList,compatibility_date:"2026-11-09"}});
+    if(u.pathname.endsWith("/versions/"+previous))return result({success:true,result:{resources:{bindings:bindingList,script_runtime:{compatibility_date:"2026-11-09T00:00:00Z"}}}});
     if(u.pathname.endsWith("/versions")&&method==="GET")
       return result({success:true,result:{items:[{id:latest}]}});
     if(u.pathname.endsWith("/versions")&&method==="POST"){
       upload=opts.body;
       assert.ok(upload instanceof FormData);
-      const metadata=JSON.parse(await upload.get("metadata").text());
+      const metadata=JSON.parse(upload.get("metadata"));
       assert.equal(metadata.bindings.length,9);
       assert.equal(metadata.bindings.every(x=>x.type==="inherit"),true);
       return result({success:true,result:{id:next}});
