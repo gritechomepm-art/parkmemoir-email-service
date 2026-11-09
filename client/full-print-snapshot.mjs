@@ -46,7 +46,9 @@ export function makeWinterFullPrintEmailPayload({email,turnstileToken,win=window
       .filter(([id])=>check(d,id)).map(([,name])=>name);
   const days=Number(byId(d,"trip-days")?.value);
   const fridgeW=Number(byId(d,"fridge-watts")?.value||18);
-  const recharge=String(byId(d,"recharge")?.value||"none");
+  // V12.5 uses a numeric <input id="recharge" min="1" max="14">, not a select.
+  const selectedRecharge=Number(byId(d,"recharge")?.value);
+  const recharge=String(Number.isInteger(selectedRecharge)&&selectedRecharge>=1&&selectedRecharge<=14 ? selectedRecharge : days);
   const method=byId(d,"winter-recharge-method")?.value||"none";
   const packing=[...d.querySelectorAll("[data-pack]:checked")]
       .map(el=>String(el.dataset.pack||"").toLowerCase().replace(/[^a-z-]/g,"-").slice(0,80))
