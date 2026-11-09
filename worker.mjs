@@ -85,130 +85,82 @@ async function resend(env,path,method,body,{contacts=false,idempotencyKey}={}) {
 }
 function baseReady(env){return Boolean(env.RESEND_API_KEY&&env.EMAIL_FROM&&env.TURNSTILE_SECRET_KEY&&env.SUBSCRIBERS&&env.RATE_HASH_SECRET);}
 
-function pdfAscii(value) {
-  return String(value).replace(/[^\x20-\x7e]/g,"?");
-}
-function pdfEscape(value) {
-  return pdfAscii(value).replace(/\\/g,"\\\\").replace(/\(/g,"\\(").replace(/\)/g,"\\)");
-}
-function pdfWrapped(value,limit=88) {
-  const words=pdfAscii(value).split(/\s+/).filter(Boolean),out=[];
-  let line="";
-  for(let word of words) {
-    while(word.length>limit) {
-      if(line){out.push(line);line="";}
-      out.push(word.slice(0,limit));word=word.slice(limit);
-    }
-    if(!line)line=word;
-    else if(line.length+word.length+1>limit){out.push(line);line=word;}
-    else line+=" "+word;
+// The complete printable report must come from the existing Winter Planner's
+// preparePrint() DOM. The Worker never reconstructs a reduced PDF from plan fields.
+const FULL_PRINT_VERSION="winter-full-print-v12.5";
+function validPrintSnapshot(s){
+  if(!s||typeof s!=="object"||Array.isArray(s)||s.version!==FULL_PRINT_VERSION)return false;
+  if(typeof s.markup!=="string"||s.markup.length<200||s.markup.length>160000)return false;
+  if(typeof s.css!=="string"||s.css.length<100||s.css.length>100000)return false;
+  // The source is the existing complete #print-plan subtree and the site's
+  // print stylesheet, not a separately written report.
+  if(!/id=["']print-plan["']/i.test(s.markup))return false;
+  for(const label of ["Access &amp; stay notes","Your packing checklist","Recommended products","Affiliate disclosure"]){
+    if(!s.markup.includes(label))return false;
   }
-  if(line)out.push(line);
-  return out.length?out:[""];
+  const riskyMarkup=/<\s*\/?\s*(?:script|iframe|frame|object|embed|link|meta|base|form|video|audio)\b|on[a-z]{3,}\s*=|javascript\s*:|data\s*:\s*text\/html/i;
+  if(riskyMarkup.test(s.markup))return false;
+  if(/<\s*\/?\s*style\b/i.test(s.markup))return false;
+  // Block arbitrary network-backed resources from user-supplied markup/CSS.
+  if(/url\s*\(\s*["']?\s*(?:https?:|\/\/)/i.test(s.css+s.markup))return false;
+  if(/@import\b|<\/style|<\/head|<\/body|<html\b/i.test(s.css))return false;
+  const srcs=[...s.markup.matchAll(/<img\b[^>]*?\bsrc=["']([^"']+)["']/gi)];
+  if(srcs.some(m=>!/^data:image\/(?:png|webp|jpeg);base64,[A-Za-z0-9+/=]+$/i.test(m[1])))return false;
+  return true;
 }
-export function buildPlanPdf(p,nps) {
-  // Self-contained, printable PDF; no external fonts, R2, browser rendering or dependencies.
-  // The attachment is a readable planning summary, not a pixel-identical website printout.
-  const entries=[
-    ["PARKMEMOIR | YOUR TRIP & POWER PLAN",true],
-    ["Prepared: "+new Date().toISOString().slice(0,10),false],
-    ["",false],
-    ["TRIP DETAILS",true],
-    ["National park: "+p.park.replace(/-/g," "),false],
-    ["Travel month: "+p.month+"  |  Duration: "+p.days+" day(s)",false],
-    ["Overnight stay: "+p.stay,false],
-    ["",false],
-    ["EQUIPMENT & POWER",true],
-    ["Devices: "+(p.load.join(", ")||"none selected"),false],
-    ["12V fridge: "+p.fridgeModel+"; average "+p.fridgeW+" W (illustrative only)",false],
-    ["Fridge owned: "+p.fridgeOwned+"  |  Plug: "+p.fridgePlug,false],
-    ["Startup peak: "+(p.fridgePeak===""?"not verified":p.fridgePeak+" W"),false],
-    ["Charging method: "+p.method+"  |  Recharge interval: "+p.recharge,false],
-    ["Vehicle charging confirmed: "+(p.vehicleConfirmed?"yes":"no"),false],
-    ["Portable power away from vehicle: "+(p.portableAway?"yes":"no"),false],
-    ["",false],
-    ["CHECKLIST ITEMS MARKED OFF",true],
-    ...((p.unchecked.length?p.unchecked:["None recorded"]).map(s=>["- "+s.replace(/-/g," "),false])),
-    ["",false],
-    ["BEFORE YOU GO",true],
-    ["Verify official road closures, campground permits, weather, and legal overnight stays.",false],
-    ["Battery capacity, solar harvest, and appliance draw vary in real conditions.",false],
-    ["Confirm charging cables, refrigerator startup loads, and emergency supplies.",false],
-    ["",false],
-    ["OFFICIAL NPS INFORMATION",true],
-    [nps,false],
-    ["",false],
-    ["This is a one-time requested plan, not a marketing subscription.",false],
-    ["PARKMEMOIR - parkmemoir.com",false]
-  ];
-  const lines=entries.flatMap(([value,heading])=>heading?[[pdfAscii(value),true]]:pdfWrapped(value).map(s=>[s,false]));
-  const perPage=42,pages=[];
-  for(let i=0;i<lines.length;i+=perPage)pages.push(lines.slice(i,i+perPage));
-  if(pages.length>10)throw Error("PDF too large");
-  const objects=[];
-  const count=pages.length;
-  const pageIds=pages.map((_,i)=>5+i*2);
-  objects[1]="<< /Type /Catalog /Pages 2 0 R >>";
-  objects[2]="<< /Type /Pages /Kids ["+pageIds.map(id=>id+" 0 R").join(" ")+"] /Count "+count+" >>";
-  objects[3]="<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
-  objects[4]="<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>";
-  for(let i=0;i<count;i++){
-    const pageId=pageIds[i],contentId=pageId+1;
-    const ops=[
-      "0.984 0.976 0.961 rg 0 0 612 792 re f",
-      "0.37 0.27 0.20 rg 0 743 612 49 re f",
-      "BT /F2 15 Tf 1 1 1 rg 46 761 Td (PARKMEMOIR) Tj ET",
-      "0.66 0.52 0.39 RG 46 720 m 566 720 l S"
-    ];
-    let y=697;
-    for(const [line,heading] of pages[i]){
-      if(heading)ops.push("BT /F2 11 Tf 0.32 0.24 0.19 rg 47 "+y+" Td ("+pdfEscape(line)+") Tj ET");
-      else ops.push("BT /F1 9.3 Tf 0.22 0.23 0.22 rg 47 "+y+" Td ("+pdfEscape(line)+") Tj ET");
-      y-=14;
-    }
-    ops.push("BT /F1 8 Tf 0.4 0.4 0.4 rg 47 44 Td (PARKMEMOIR  |  Personal copy  |  Page "+(i+1)+" of "+count+") Tj ET");
-    const stream=ops.join("\n")+"\n";
-    objects[pageId]="<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents "+contentId+" 0 R >>";
-    objects[contentId]="<< /Length "+stream.length+" >>\nstream\n"+stream+"endstream";
-  }
-  let raw="%PDF-1.4\n%\xE2\xE3\xCF\xD3\n",offsets=[0];
-  for(let id=1;id<objects.length;id++){
-    offsets[id]=raw.length;
-    raw+=id+" 0 obj\n"+objects[id]+"\nendobj\n";
-  }
-  const xref=raw.length;
-  raw+="xref\n0 "+objects.length+"\n0000000000 65535 f \n";
-  for(let id=1;id<objects.length;id++)raw+=String(offsets[id]).padStart(10,"0")+" 00000 n \n";
-  raw+="trailer\n<< /Size "+objects.length+" /Root 1 0 R >>\nstartxref\n"+xref+"\n%%EOF\n";
-  return raw;
+function buildPrintableHtml(s){
+  return '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>'+
+    s.css+'</style></head><body>'+s.markup+'</body></html>';
+}
+function encodeBase64Bytes(bytes){
+  let binary="";
+  for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
+  return btoa(binary);
+}
+export async function renderFullPrintPdf(env,snapshot){
+  if(!validPrintSnapshot(snapshot)||!env.BROWSER?.quickAction)throw Error("full print report unavailable");
+  const response=await env.BROWSER.quickAction("pdf",{
+    html:buildPrintableHtml(snapshot),
+    pdfOptions:{format:"a4",printBackground:true,preferCSSPageSize:true},
+    // Links remain clickable in PDF; no external resources are fetched.
+    rejectRequestPattern:["/^https?:\\/\\//"],
+  });
+  if(!response.ok)throw Error("PDF renderer unavailable");
+  const bytes=new Uint8Array(await response.arrayBuffer());
+  if(bytes.length<500||bytes.length>5*1024*1024)throw Error("invalid PDF size");
+  const header=new TextDecoder("latin1").decode(bytes.subarray(0,8));
+  const tail=new TextDecoder("latin1").decode(bytes.subarray(Math.max(0,bytes.length-1024)));
+  if(!header.startsWith("%PDF-")||!tail.includes("%%EOF"))throw Error("invalid PDF bytes");
+  return {filename:"PARKMEMOIR_Full_Winter_Trip_Plan.pdf",content:encodeBase64Bytes(bytes)};
 }
 function planContent(p,nps){
-  const body=["Your PARKMEMOIR Trip & Power Plan is attached as a PDF.",
+  const body=[
+    "Your complete PARKMEMOIR winter trip planner PDF is attached.",
     "Park: "+p.park.replace(/-/g," "),"Month: "+p.month,"Days: "+p.days,"Stay: "+p.stay,
-    "Devices: "+(p.load.join(", ")||"none"),
-    "12V fridge average: "+p.fridgeW+"W (illustrative, not measured)",
+    "The attached document includes the full trip and access notes, packing checklist, matched product/booking links, and affiliate disclosure.",
     "Official NPS information: "+nps,
-    "The PDF is a self-contained planning summary; no website login or print link is required.",
-    "Verify road access, legal camping, loads, compatible cables, charging and weather before departure.",
-    "This one-time email did not subscribe you to marketing."].join("\n\n");
-  return {subject:"Your PARKMEMOIR Trip & Power Plan (PDF attached)",text:body,
-    html:'<main style="max-width:620px;padding:20px;font:16px/1.6 system-ui"><h1>Your trip plan PDF is attached</h1><p>'+esc(p.days+" days | "+p.park+" | "+p.stay)+'</p><p>Your personalized PDF is attached to this email. No old website print link is needed.</p><p><a href="'+esc(nps)+'">Check official NPS road and park conditions</a></p><p style="font-size:12px">One-time requested email only. No marketing subscription was created. Estimates and access are not guaranteed.</p></main>'};
+    "Check live road and campground status, weather, and product specifications before you travel.",
+    "This one-time email did not subscribe you to marketing."
+  ].join("\n\n");
+  return {subject:"Your full PARKMEMOIR Winter Trip Plan (PDF attached)",text:body,
+    html:'<main style="max-width:620px;padding:20px;font:16px/1.6 system-ui"><h1>Your complete winter trip PDF is attached</h1><p>'+esc(p.days+" days | "+p.park+" | "+p.stay)+'</p><p>This is your complete printable plan with personalized access information, packing checklist, equipment and booking recommendations, and affiliate disclosure. No old website print link is needed.</p><p><a href="'+esc(nps)+'">Official NPS information</a></p><p style="font-size:12px">One-time email only; no marketing subscription. Always verify current conditions.</p></main>'};
 }
 async function plan(request,env){
   if(!baseReady(env))return respond(503,{ok:false,error:"Email service not configured"});
-  const d=await readJSON(request);
+  const d=await readJSON(request,350000);
   if(!d||d.requestedOnly!==true||!validEmail(d.email)||!validPlan(d.plan))return respond(400,{ok:false,error:"Invalid plan"});
+  if(!validPrintSnapshot(d.printSnapshot))return respond(400,{ok:false,error:"Complete printable report required"});
   const base=safeWebUrl(d.pageUrl),nps=safeWebUrl(d.npsUrl,true);
   if(!base||!nps)return respond(400,{ok:false,error:"Invalid URL"});
   if(!await verified(request,env,d.turnstileToken,"email_plan"))return respond(403,{ok:false,error:"Verification failed"});
   if(!await rate(request,env,"plan",20))return respond(429,{ok:false,error:"Rate limit"});
   const message=planContent(d.plan,nps);
-  const pdf=buildPlanPdf(d.plan,nps);
-  message.attachments=[{filename:"PARKMEMOIR_Trip_and_Power_Plan.pdf",content:btoa(pdf)}];
+  const pdf=await renderFullPrintPdf(env,d.printSnapshot);
+  message.attachments=[pdf];
   const recipient=d.email.trim().toLowerCase();
   // Resend deduplicates repeated identical requests within 24 hours.
   // Never put a raw email address or unkeyed identifying hash in request headers.
-  const key="pm-plan-pdf-v1-"+await digest(["pdf-v1",env.RATE_HASH_SECRET,recipient,JSON.stringify(d.plan),base,nps,Math.floor(now()/600)].join("|"));
+  const key="pm-full-print-v125-"+await digest(["full-print-v12.5",env.RATE_HASH_SECRET,recipient,JSON.stringify(d.plan),d.printSnapshot.markup,d.printSnapshot.css,Math.floor(now()/600)].join("|"));
   const result=await resend(env,"/emails","POST",{from:env.EMAIL_FROM,to:[recipient],...message},{idempotencyKey:key});
   return result.ok?respond(200,{ok:true,status:"accepted"}):respond(502,{ok:false,error:"Provider did not accept email"});
 }
@@ -291,7 +243,7 @@ async function execute(request,env) {
   const pathname=new URL(request.url).pathname;
   if(pathname==="/health" && request.method==="GET") {
     // Binding presence only: no mail, database reads, or private values are exposed.
-    const configured=baseReady(env) && Boolean(env.RESEND_CONTACTS_API_KEY&&env.SEASONAL_SEGMENT_ID&&env.SEASONAL_TOPIC_ID);
+    const configured=baseReady(env) && Boolean(env.RESEND_CONTACTS_API_KEY&&env.SEASONAL_SEGMENT_ID&&env.SEASONAL_TOPIC_ID&&env.BROWSER?.quickAction);
     return respond(configured?200:503,{ok:configured,service:"parkmemoir-email",status:configured?"configured":"missing_config"});
   }
   if(request.method==="OPTIONS") {
