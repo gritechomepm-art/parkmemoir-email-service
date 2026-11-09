@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Isolated Cloudflare Worker with transactional plan mail and optional double opt-in",
   "scripts": {
-    "test": "node --test worker.test.mjs",
-    "check": "node --check worker.mjs && node --check worker.test.mjs"
+    "test": "node --test worker.test.mjs client/full-print-snapshot.test.mjs",
+    "check": "node --check worker.mjs && node --check worker.test.mjs && node --check client/full-print-snapshot.mjs && node --check client/full-print-snapshot.test.mjs"
   },
   "engines": {
     "node": ">=24"
