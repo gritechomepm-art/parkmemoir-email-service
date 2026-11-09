@@ -1,64 +1,91 @@
-# Manual account-owner setup: Cloudflare + Resend
+# PARKMEMOIR — Isolated Email Worker Setup
 
-**Do not do these steps until the isolated email-service PR passes CI and you approve deployment.** The repository CI does not deploy anything. No API key should be copied into ChatGPT or GitHub.
+**Current state (2026-11-09): source candidate only; sender verified; Worker not deployed.** Do not merge or publish on CI alone.
 
-## A. Resend account — owner action
+## Already completed in Resend
 
-1. Open [Resend Domains](https://resend.com/domains). Add a subdomain for sending such as \`mail.parkmemoir.com\` (or another verified domain you control). Publish the exact SPF/DKIM records shown by Resend in Cloudflare DNS. Review DMARC and verify status. Sender email must belong to the verified domain; if sending as \`plans@parkmemoir.com\`, verify \`parkmemoir.com\` itself instead.
-2. Create a dedicated sending-capable API key in [Resend API Keys](https://resend.com/api-keys); do not expose it. A restricted key may be insufficient if it cannot query/create Contacts or edit Segments, so verify required scopes.
-3. Under [Resend Segments](https://resend.com/segments), create \`PARKMEMOIR Seasonal Updates\`; record the Segment ID privately. Check free-tier caps in your account.
-4. Verify Resend's present-day Contacts and Segments API, global unsubscribe behavior and Broadcast unsubscribe settings before any broadcast. Existing globally unsubscribed users must **not** be reactivated by confirmation.
+- Sending domain `mail.parkmemoir.com`: **Verified** (DKIM TXT, SPF MX, SPF TXT and CNAME; sending on, receiving off).
+- Verified sender format for this service: `PARKMEMOIR <plans@mail.parkmemoir.com>`.
+- Marketing Segment `PARKMEMOIR — Confirmed Seasonal Updates` exists.
+- Marketing Topic `PARKMEMOIR Seasonal Updates` exists with default subscription `opt_out`.
+- Existing `Onboarding` API key is not used by this Worker.
+- No real email delivery tests, Cloudflare Worker route or D1 resource deployed.
 
-## B. Cloudflare account — owner action
+**Important:** The sending domain `mail.parkmemoir.com` is different from the proposed API host `email.parkmemoir.com`. There is no reason to change the verified sending-domain DNS again.
 
-1. Confirm \`parkmemoir.com\` is in your Cloudflare zone. Create a **separate** Worker \`parkmemoir-email\`; do not modify or bind anything to the static-only \`parkmemoir-public-p0\` Worker.
-2. Create D1 \`parkmemoir-email-consent\` and obtain its private UUID. Apply \`migrations/0001.sql\` to this database **only**. Use Cloudflare dashboard or the CLI after a safe review:
+## Step 1 — Two credentials in Resend (owner; do not paste them anywhere public)
 
-   \`\`\`sh
-   npx wrangler d1 create parkmemoir-email-consent
-   npx wrangler d1 execute parkmemoir-email-consent --remote --file=migrations/0001.sql
-   \`\`\`
+At https://resend.com/api-keys create:
 
-3. Register a Turnstile widget for \`parkmemoir.com\` (include \`www.parkmemoir.com\` if applicable). In the site code, action names must be \`email_plan\` and \`seasonal_signup\`; keep site key public and secret server-side.
-4. Make a local copy of \`wrangler.toml.example\` named \`wrangler.toml\`. Change the D1 \`database_id\` to the actual UUID; set \`EMAIL_FROM\` to the verified sender; set \`SEASONAL_SEGMENT_ID\` to the real Segment ID. Only after approval uncomment the separate Custom Domain mapping \`email.parkmemoir.com\`. Do not route \`parkmemoir.com/*\` through this Worker.
-5. Configure Worker Secrets on \`parkmemoir-email\` only (not in a committed file):
+1. `parkmemoir-email-send`: **Sending access**, restricted to `mail.parkmemoir.com`; store in the Worker secret `RESEND_API_KEY`.
+2. `parkmemoir-consent-contacts`: **Full access**, needed only for GET/POST Contacts, PATCH Topics, POST Segment membership; store in Worker secret `RESEND_CONTACTS_API_KEY`.
 
-   \`\`\`sh
-   npx wrangler secret put RESEND_API_KEY
-   npx wrangler secret put TURNSTILE_SECRET_KEY
-   npx wrangler secret put RATE_HASH_SECRET
-   \`\`\`
+The full-access key has broader platform permissions. The Worker never serves it to the browser. Do not place either value in code, GitHub files, logs or chat. Marketing signup/confirmation fails closed until the second key is installed.
 
-   Use a cryptographically random RATE_HASH_SECRET. Verify the Worker has \`SUBSCRIBERS\` D1 binding. Check existing free-tier CPU/request/D1 limits.
+## Step 2 — Isolated Cloudflare resources
 
-6. With explicit approval and a reviewed config, deploy the **new Worker only**; validate Custom Domain DNS and TLS. Its routes reject unexpected hosts and origins.
+In Cloudflare Workers & Pages, set up a new Worker named `parkmemoir-email` (NOT `parkmemoir-public-p0`). Do not attach the current production website's database, API, Digital Companion or static-worker bindings.
 
-## C. Acceptance tests — before website hookup
+Create D1 database `parkmemoir-email-consent`; apply `migrations/0001.sql` to this D1 only:
 
-- One-time \`Send Plan\` delivers to a real test inbox and creates **no** marketing Contact/Segment membership.
-- Separate Seasonal Updates checkbox is **not checked by default**; requesting consent sends confirmation but creates **no** marketing contact.
-- Opening the GET confirmation link is inert; pressing the form confirmation POST creates one Contact and membership in exactly the intended Segment.
-- Repeat clicks, expired links, failed Turnstile, improper origins, provider rejection and throttle fail safely. Existing global unsubscribes remain suppressed.
-- Check delivery status and actual inbox, not just Resend HTTP 200. Test from mobile, check link privacy and no secret exposure.
-- Complete privacy notice, postal address/identity if applicable, retention and deletion process, D1/Resend unsubscribe reconciliation, and approved marketing copy before ever sending Broadcasts.
+```bash
+npx wrangler d1 create parkmemoir-email-consent
+npx wrangler d1 execute parkmemoir-email-consent --remote --file=migrations/0001.sql
+```
 
-## D. Only then: website integration
+Create a Cloudflare Turnstile widget for `parkmemoir.com` (also `www.parkmemoir.com` if needed). The frontend action names are `email_plan` and `seasonal_signup`. Public site key belongs only in the browser; secret key only in the Worker.
 
-Update owner-approved Winter Planner frontend through a new website PR. Before the main planner script, insert public config **only** after live backend acceptance:
+## Step 3 — Worker config (not a live deploy)
 
-\`\`\`js
-window.PARKMEMOIR_PLAN_EMAIL_CONFIG = {
-  enabled: true,
-  endpoint: "https://email.parkmemoir.com/api/send-plan",
-  siteKey: "YOUR_PUBLIC_TURNSTILE_SITE_KEY"
-};
-window.PARKMEMOIR_SEASONAL_CONFIG = {
-  enabled: true,
-  endpoint: "https://email.parkmemoir.com/api/seasonal-subscribe",
-  siteKey: "YOUR_PUBLIC_TURNSTILE_SITE_KEY"
-};
-\`\`\`
+Copy `wrangler.toml.example` to **untracked** local `wrangler.toml`. Replace `SET_REAL_D1_DATABASE_ID_AFTER_MIGRATION`, `SET_REAL_RESEND_SEGMENT_ID` and `SET_REAL_RESEND_TOPIC_ID` with actual account values. Keep:
 
-Until then, keep both enabled flags \`false\`. Existing Save Plan, Share Link and PDF features stay functional. Do not change website Logo, existing disclosures, GA4, SEO or frozen public release gates.
+- `EMAIL_FROM = "PARKMEMOIR <plans@mail.parkmemoir.com>"`.
+- `SUBSCRIBERS` D1 binding tied to the dedicated database.
+- `workers_dev = false`, `preview_urls = false`, and the Custom Domain route commented out until owner approves deploying the email Worker.
+- Cron enabled for pending-confirmation/rate-limit cleanup.
 
-**Account actions still requiring the owner:** Resend sender verification and Segment, Cloudflare D1/Turnstile/Worker secrets/custom domain, live inbox testing and explicit production-deploy authorization.
+Store four **Secrets** on `parkmemoir-email`: `RESEND_API_KEY`, `RESEND_CONTACTS_API_KEY`, `TURNSTILE_SECRET_KEY`, and random `RATE_HASH_SECRET` (at least 32 cryptographically random bytes, represented as hex).
+
+**Caution:** Modern `npx wrangler secret put NAME` immediately deploys a new Worker version. For predeployment setup, use Cloudflare Dashboard > Worker > Settings > Variables and Secrets (type **Secret**), or `npx wrangler versions secret put NAME` on a staged version, and inspect any deploy UI prompts before confirming. The existing public marketing Worker must remain untouched. Check current Cloudflare documentation: https://developers.cloudflare.com/workers/configuration/secrets/.
+
+## Step 4 — Source verification before production
+
+```bash
+node --check worker.mjs
+node --check worker.test.mjs
+node --test worker.test.mjs
+```
+
+CI runs mocked tests; this does **not** prove Resend sending, Cloudflare DNS binding, D1 schema or inbox arrival.
+
+## Step 5 — Explicit production approval and live QA
+
+After source CI passes, owner reviews PR and authorizes its merge. **Separately** authorize uploading/deploying this new Worker; only then enable Custom Domain `email.parkmemoir.com`, verify DNS/TLS and release. Never route `parkmemoir.com/*` to the service Worker.
+
+- Send one requested plan to a controlled test inbox. Expect HTTP 200 `{"ok":true,"status":"accepted"}`; verify inbox and saved-plan/print-PDF URL. The Worker **does not attach a PDF binary** (as agreed in Winter Planner V5.7); it sends a private email with an instruction to reopen and print the existing planner.
+- Verify **no marketing Contact** appears after transactional sending.
+- Click a separately unchecked-by-default seasonal checkbox and submit; test email confirmation link. GET confirmation page alone must not subscribe.
+- Click Confirm POST; check D1 audit status, Resend Segment membership and explicit Topic `opt_in`. Test expired, duplicate, provider errors, and globally unsubscribed contacts.
+- Marketing unsubscribe, privacy disclosures, reconciling D1 and Resend after errors, and any bulk-send setup require separate approval before sending broadcasts.
+- Confirm no secrets or recipient email addresses in GitHub, analytics, or Worker logs.
+
+Only after live tests pass may the separately reviewed PARKMEMOIR website PR enable the planner frontend config. Keep `PARKMEMOIR_PLAN_EMAIL_CONFIG.enabled = false` and `PARKMEMOIR_SEASONAL_CONFIG.enabled = false` until then.
+
+## API contract for Winter Planner V5.7
+
+`POST https://email.parkmemoir.com/api/send-plan` with JSON:
+
+```json
+{
+  "requestedOnly": true,
+  "email": "visitor@example.com",
+  "plan": {"v":1,"park":"zion","month":"nov","days":2,"stay":"camping","load":["fridge","phones"],"recharge":"none","method":"none","vehicleConfirmed":false,"portableAway":false,"fridgeW":18,"fridgeModel":"other","fridgePlug":"unknown","fridgePeak":"","fridgeOwned":"no","unchecked":[],"sample":false},
+  "turnstileToken": "TOKEN_FROM_CLOUDFLARE_BROWSER_WIDGET",
+  "pageUrl": "https://parkmemoir.com/which-national-parks-are-open-in-winter/",
+  "npsUrl": "https://www.nps.gov/zion/planyourvisit/conditions.htm"
+}
+```
+
+`/api/seasonal-subscribe` takes `{email,consent:true,consentVersion:"pm-seasonal-updates-v1-2026-11-08",sourcePage,turnstileToken}`. Only explicit POST of the email's confirmation token activates consent.
+
+**Release status:** `DOMAIN_VERIFIED / WORKER_SOURCE_REVIEW / PRODUCTION_NOT_DEPLOYED`.
