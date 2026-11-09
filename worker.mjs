@@ -77,7 +77,7 @@ async function resend(env,path,method,body,{contacts=false,idempotencyKey}={}) {
   // Sending has a domain-restricted key; marketing Contact/Segment access is a distinct secret.
   const key=contacts?env.RESEND_CONTACTS_API_KEY:env.RESEND_API_KEY;
   if(!key)throw Error("Resend credential unavailable");
-  const headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"};
+  const headers={"Authorization":"Bearer "+key,"Content-Type":"application/json","User-Agent":"parkmemoir-email-service/1.0"};
   if(idempotencyKey)headers["Idempotency-Key"]=idempotencyKey;
   const response=await fetch("https://api.resend.com"+path,{method,headers,...(body?{body:JSON.stringify(body)}:{})});
   let data={};try{data=await response.json();}catch{}
@@ -152,7 +152,7 @@ async function confirm(request,env){
     // The Resend topic was created with default opt_out, so an affirmative DOI
     // must explicitly opt the confirmed contact into this topic before segment membership.
     const topic=await resend(env,"/contacts/"+encodeURIComponent(id)+"/topics","PATCH",
-      [{id:env.SEASONAL_TOPIC_ID,subscription:"opt_in"}],{contacts:true});
+      {topics:[{id:env.SEASONAL_TOPIC_ID,subscription:"opt_in"}]},{contacts:true});
     if(!topic.ok)throw Error("topic");
     const segment=await resend(env,"/contacts/"+encodeURIComponent(id)+"/segments/"+encodeURIComponent(env.SEASONAL_SEGMENT_ID),"POST",undefined,{contacts:true});
     if(!segment.ok)throw Error("segment");
