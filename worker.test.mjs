@@ -20,17 +20,26 @@ const D1 = {
     };
   },
 };
-const env={SUBSCRIBERS:D1,RESEND_API_KEY:"TEST_ONLY",EMAIL_FROM:"PARKMEMOIR <plans@parkmemoir.com>",TURNSTILE_SECRET_KEY:"TEST_ONLY",RATE_HASH_SECRET:"TEST_ONLY",SEASONAL_SEGMENT_ID:"33333333-3333-4333-8333-333333333333"};
+const env={SUBSCRIBERS:D1,RESEND_API_KEY:"TEST_ONLY",RESEND_CONTACTS_API_KEY:"CONTACTS_TEST_ONLY",EMAIL_FROM:"PARKMEMOIR <plans@mail.parkmemoir.com>",TURNSTILE_SECRET_KEY:"TEST_ONLY",RATE_HASH_SECRET:"TEST_ONLY",SEASONAL_SEGMENT_ID:"33333333-3333-4333-8333-333333333333",SEASONAL_TOPIC_ID:"77777777-7777-4777-8777-777777777777"};
 const consentVersion="pm-seasonal-updates-v1-2026-11-08";
-const emails=[],contacts=new Map();let mailFails=false,segmentFails=false;
+const emails=[],emailKeys=[],contacts=new Map();let mailFails=false,segmentFails=false,topicFails=false;
 const fakeFetch=async(url,opts={})=>{
   const u=String(url);
   if(u.includes("challenges.cloudflare.com/turnstile/")){const action=new URLSearchParams(opts.body).get("response")==="plan-token"?"email_plan":"seasonal_signup";return Response.json({success:true,hostname:"parkmemoir.com",action});}
   if(!u.startsWith("https://api.resend.com"))throw Error("Unexpected fetch "+u);
   const path=u.slice("https://api.resend.com".length),method=opts.method||"GET",body=opts.body?JSON.parse(opts.body):null;
-  if(path==="/emails"){emails.push(body);return Response.json({id:"sent"},{status:mailFails?502:200});}
-  if(path==="/contacts"&&method==="POST"){const id="44444444-4444-4444-8444-"+String(contacts.size+1).padStart(12,"0");contacts.set(body.email,{id,email:body.email,unsubscribed:false,segments:new Set()});return Response.json({id});}
+  assert.equal(opts.headers.Authorization,"Bearer "+(path.startsWith("/contacts")?"CONTACTS_TEST_ONLY":"TEST_ONLY"));
+  if(path==="/emails"){emails.push(body);emailKeys.push(opts.headers["Idempotency-Key"]||null);return Response.json({id:"sent"},{status:mailFails?502:200});}
+  if(path==="/contacts"&&method==="POST"){const id="44444444-4444-4444-8444-"+String(contacts.size+1).padStart(12,"0");contacts.set(body.email,{id,email:body.email,unsubscribed:false,segments:new Set(),topics:new Map()});return Response.json({id});}
   if(path.startsWith("/contacts/")&&method==="GET"){const email=decodeURIComponent(path.slice(10)),c=contacts.get(email);return c?Response.json(c):Response.json({error:"not found"},{status:404});}
+  const topic=path.match(/^\/contacts\/([^/]+)\/topics$/);
+  if(topic&&method==="PATCH"){
+    if(topicFails)return Response.json({error:"topic error"},{status:503});
+    const c=[...contacts.values()].find(x=>x.id===decodeURIComponent(topic[1]));assert.ok(c);
+    c.topics??=new Map();
+    for(const t of body)c.topics.set(t.id,t.subscription);
+    return Response.json({object:"contact_topics"});
+  }
   const m=path.match(/^\/contacts\/([^/]+)\/segments\/([^/]+)$/);
   if(m&&method==="POST"){if(segmentFails)return Response.json({error:"provider"},{status:503});const c=[...contacts.values()].find(x=>x.id===m[1]);assert.ok(c);c.segments.add(m[2]);return Response.json({object:"contact_segment"});}
   throw Error("Unexpected provider path "+method+" "+path);
@@ -70,6 +79,7 @@ globalThis.fetch=fakeFetch;
     const proper=()=>new Request(SERVICE+"/api/seasonal-confirm",{method:"POST",headers:{"Origin":SERVICE,"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({token})});
     assert.equal((await route(proper(),env)).status,200);
     assert.equal(contacts.get("member@example.com").segments.has(env.SEASONAL_SEGMENT_ID),true);
+    assert.equal(contacts.get("member@example.com").topics.get(env.SEASONAL_TOPIC_ID),"opt_in");
     assert.equal(db.prepare("SELECT status FROM pm_seasonal_consent WHERE email=?").get("member@example.com").status,"confirmed");
     assert.equal((await route(proper(),env)).status,410);
   });
@@ -118,6 +128,28 @@ globalThis.fetch=fakeFetch;
     assert.equal(db.prepare("SELECT status FROM pm_seasonal_consent WHERE email=?").get("segment-failed@example.com").status,"pending");
     assert.equal((await route(confirm(),env)).status,200);
     assert.equal(db.prepare("SELECT status FROM pm_seasonal_consent WHERE email=?").get("segment-failed@example.com").status,"confirmed");
+  });
+  test("failed topic opt-in leaves consent pending and outside marketing segment",async()=>{
+    const r=await route(post("/api/seasonal-subscribe",signup("topic-failed@example.com"),SITE,"14.14.14.14"),env);
+    assert.equal(r.status,202);
+    const token=emails.at(-1).text.match(/seasonal-confirm\\?token=([0-9a-f]{64})/)[1];
+    const request=()=>new Request(SERVICE+"/api/seasonal-confirm",{method:"POST",headers:{"Origin":SERVICE,"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({token})});
+    topicFails=true;
+    try{assert.equal((await route(request(),env)).status,503);}
+    finally{topicFails=false;}
+    assert.equal(db.prepare("SELECT status FROM pm_seasonal_consent WHERE email=?").get("topic-failed@example.com").status,"pending");
+    assert.equal(contacts.get("topic-failed@example.com").segments.size,0);
+    assert.equal((await route(request(),env)).status,200);
+    assert.equal(contacts.get("topic-failed@example.com").topics.get(env.SEASONAL_TOPIC_ID),"opt_in");
+  });
+  test("repeated plan requests include a stable private idempotency key",async()=>{
+    const before=emailKeys.length;
+    const body=planBody("retry@example.com");
+    assert.equal((await route(post("/api/send-plan",body,SITE,"15.15.15.15"),env)).status,200);
+    assert.equal((await route(post("/api/send-plan",body,SITE,"15.15.15.15"),env)).status,200);
+    assert.ok(emailKeys[before]?.startsWith("pm-plan-"));
+    assert.equal(emailKeys[before],emailKeys[before+1]);
+    assert.doesNotMatch(emailKeys[before],/retry@example.com/);
   });
   test("seasonal subscription rate cap blocks request seven from one IP",async()=>{
     let last;
