@@ -57,7 +57,7 @@ function fakeCloudflare({health=true,bindingList=required,latest=previous,rollBa
       assert.equal(metadata.bindings.every(x=>x.type==="inherit"),true);
       return result({success:true,result:{id:next}});
     }
-    if(u.pathname.endsWith("/versions/"+next))return result({success:true,result:{bindings:bindingList}});
+    if(u.pathname.endsWith("/versions/"+next))return result({success:true,result:{resources:{bindings:bindingList}}});
     return result({success:false},404);
   };
   return {calls,fetcher,get deployed(){return deployed;},get upload(){return upload;}};
