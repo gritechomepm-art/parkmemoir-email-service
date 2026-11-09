@@ -229,7 +229,7 @@ globalThis.fetch=fakeFetch;
     const body=planBody("retry@example.com");
     assert.equal((await route(post("/api/send-plan",body,SITE,"15.15.15.15"),env)).status,200);
     assert.equal((await route(post("/api/send-plan",body,SITE,"15.15.15.15"),env)).status,200);
-    assert.ok(emailKeys[before]?.startsWith("pm-plan-"));
+    assert.ok(emailKeys[before]?.startsWith("pm-full-print-v125-"));
     assert.equal(emailKeys[before],emailKeys[before+1]);
     assert.doesNotMatch(emailKeys[before],/retry@example.com/);
   });
