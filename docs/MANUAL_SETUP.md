@@ -1,6 +1,6 @@
 # PARKMEMOIR — Isolated Email Worker Setup
 
-**Current state (2026-11-09): source candidate only; sender verified; Worker not deployed.** Do not merge or publish on CI alone.
+**Current state (2026-11-09): source candidate only; Resend verified. Owner reports that a Cloudflare starter Worker, D1 and Turnstile exist and secrets/vars are bound; this implementation is NOT deployed.** Do not merge or publish on CI alone. See [DASHBOARD_DEPLOY_CHECKLIST.md](DASHBOARD_DEPLOY_CHECKLIST.md) for the browser-only path and final gate.
 
 ## Already completed in Resend
 
@@ -9,7 +9,7 @@
 - Marketing Segment `PARKMEMOIR — Confirmed Seasonal Updates` exists.
 - Marketing Topic `PARKMEMOIR Seasonal Updates` exists with default subscription `opt_out`.
 - Existing `Onboarding` API key is not used by this Worker.
-- No real email delivery tests, Cloudflare Worker route or D1 resource deployed.
+- No real email delivery tests or email Worker code deployed. Owner reports creating isolated D1 and a starter Worker; their bindings and secrets have not been independently read from Cloudflare.
 
 **Important:** The sending domain `mail.parkmemoir.com` is different from the proposed API host `email.parkmemoir.com`. There is no reason to change the verified sending-domain DNS again.
 
@@ -26,16 +26,18 @@ The full-access key has broader platform permissions. The Worker never serves it
 
 In Cloudflare Workers & Pages, set up a new Worker named `parkmemoir-email` (NOT `parkmemoir-public-p0`). Do not attach the current production website's database, API, Digital Companion or static-worker bindings.
 
-Create D1 database `parkmemoir-email-consent`; apply `migrations/0001.sql` to this D1 only:
+**Already done by owner — do not run these again.** D1 database `parkmemoir-email-consent` was created and `migrations/0001.sql` tables/indexes were applied through the dashboard. The commands below are reference only for a fresh environment:
 
 ```bash
 npx wrangler d1 create parkmemoir-email-consent
 npx wrangler d1 execute parkmemoir-email-consent --remote --file=migrations/0001.sql
 ```
 
-Create a Cloudflare Turnstile widget for `parkmemoir.com` (also `www.parkmemoir.com` if needed). The frontend action names are `email_plan` and `seasonal_signup`. Public site key belongs only in the browser; secret key only in the Worker.
+**Already done by owner — do not create a duplicate.** A Cloudflare Turnstile widget has been created for `parkmemoir.com` (also `www.parkmemoir.com` if needed). The frontend action names are `email_plan` and `seasonal_signup`. Public site key belongs only in the browser; secret key only in the Worker.
 
 ## Step 3 — Worker config (not a live deploy)
+
+The owner reports the dashboard Worker already has four Secrets, three plaintext vars and the `SUBSCRIBERS` D1 binding. Verify names and types in the dashboard first. The next instructions are only for the alternate Wrangler CLI path. Use [DASHBOARD_DEPLOY_CHECKLIST.md](DASHBOARD_DEPLOY_CHECKLIST.md) for the preferred browser-only deployment.
 
 Copy `wrangler.toml.example` to **untracked** local `wrangler.toml`. Replace `SET_REAL_D1_DATABASE_ID_AFTER_MIGRATION`, `SET_REAL_RESEND_SEGMENT_ID` and `SET_REAL_RESEND_TOPIC_ID` with actual account values. Keep:
 
@@ -59,6 +61,8 @@ node --test worker.test.mjs
 CI runs mocked tests; this does **not** prove Resend sending, Cloudflare DNS binding, D1 schema or inbox arrival.
 
 ## Step 5 — Explicit production approval and live QA
+
+After deploying the reviewed email Worker on its isolated custom domain, check `GET https://email.parkmemoir.com/health`. HTTP 200 confirms configuration presence only, not a successful email send. HTTP 503 means a missing configuration value.
 
 After source CI passes, owner reviews PR and authorizes its merge. **Separately** authorize uploading/deploying this new Worker; only then enable Custom Domain `email.parkmemoir.com`, verify DNS/TLS and release. Never route `parkmemoir.com/*` to the service Worker.
 
