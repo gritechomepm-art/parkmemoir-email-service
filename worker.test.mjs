@@ -2,7 +2,7 @@ import test, {after} from "node:test";
 import assert from "node:assert/strict";
 import {DatabaseSync} from "node:sqlite";
 import {readFileSync} from "node:fs";
-import {route,cleanupExpired,buildPlanPdf} from "./worker.mjs";
+import {route,cleanupExpired,renderFullPrintPdf} from "./worker.mjs";
 const SERVICE="https://email.parkmemoir.com";
 const SITE="https://parkmemoir.com";
 const db=new DatabaseSync(":memory:");
@@ -20,7 +20,36 @@ const D1 = {
     };
   },
 };
-const env={SUBSCRIBERS:D1,RESEND_API_KEY:"TEST_ONLY",RESEND_CONTACTS_API_KEY:"CONTACTS_TEST_ONLY",EMAIL_FROM:"PARKMEMOIR <plans@mail.parkmemoir.com>",TURNSTILE_SECRET_KEY:"TEST_ONLY",RATE_HASH_SECRET:"TEST_ONLY",SEASONAL_SEGMENT_ID:"33333333-3333-4333-8333-333333333333",SEASONAL_TOPIC_ID:"77777777-7777-4777-8777-777777777777"};
+
+function samplePrintSnapshot(){
+  return {
+    version:"winter-full-print-v12.5",
+    markup:'<section id="print-plan"><h1>Zion winter trip</h1><h2>Access &amp; stay notes</h2><p>Current NPS conditions and power calculations</p><h2>Your packing checklist</h2><ul><li>Warm clothing</li><li>Emergency kit</li></ul><h2>Recommended products &amp; booking links</h2><a href="https://pboost.me/sample">Check verified gear</a><p>Affiliate disclosure: PARKMEMOIR may earn a commission.</p></section>',
+    css:"@media print { @page { size: A4; margin: 10mm } body{font-family: Georgia, serif} #print-plan{display:block;line-height:1.5} #print-plan h1{font-size:24pt} #print-plan a{color:#62422c} }"
+  };
+}
+function examplePdfFixture(){
+  const stream="BT /F1 12 Tf 50 700 Td (PARKMEMOIR complete print) Tj ET\n";
+  const objs=[
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Length "+stream.length+" >>\nstream\n"+stream+"endstream"
+  ];
+  let raw="%PDF-1.4\n",positions=[0];
+  for(let i=0;i<objs.length;i++){positions.push(raw.length);raw+=(i+1)+" 0 obj\n"+objs[i]+"\nendobj\n";}
+  const xref=raw.length;raw+="xref\n0 6\n0000000000 65535 f \n";
+  for(let i=1;i<=objs.length;i++)raw+=String(positions[i]).padStart(10,"0")+" 00000 n \n";
+  raw+="trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"+xref+"\n%%EOF\n";
+  return raw;
+}
+const browserCalls=[];
+const BROWSER={quickAction:async(action,args)=>{
+  browserCalls.push({action,args});
+  return new Response(new TextEncoder().encode(examplePdfFixture()),{status:200,headers:{"Content-Type":"application/pdf"}});
+}};
+const env={BROWSER,SUBSCRIBERS:D1,RESEND_API_KEY:"TEST_ONLY",RESEND_CONTACTS_API_KEY:"CONTACTS_TEST_ONLY",EMAIL_FROM:"PARKMEMOIR <plans@mail.parkmemoir.com>",TURNSTILE_SECRET_KEY:"TEST_ONLY",RATE_HASH_SECRET:"TEST_ONLY",SEASONAL_SEGMENT_ID:"33333333-3333-4333-8333-333333333333",SEASONAL_TOPIC_ID:"77777777-7777-4777-8777-777777777777"};
 const consentVersion="pm-seasonal-updates-v1-2026-11-08";
 const emails=[],emailKeys=[],contacts=new Map();let mailFails=false,segmentFails=false,topicFails=false;
 const fakeFetch=async(url,opts={})=>{
@@ -49,7 +78,7 @@ const fakeFetch=async(url,opts={})=>{
 };
 function post(path,data,origin=SITE,ip="1.2.3.4"){return new Request(SERVICE+path,{method:"POST",headers:{"Origin":origin,"Content-Type":"application/json","CF-Connecting-IP":ip},body:JSON.stringify(data)});}
 function signup(email,token="signup-token"){return {email,turnstileToken:token,consent:true,consentVersion,sourcePage:SITE+"/which-national-parks-are-open-in-winter/"};}
-function planBody(email){return {requestedOnly:true,email,turnstileToken:"plan-token",pageUrl:SITE+"/which-national-parks-are-open-in-winter/",npsUrl:"https://www.nps.gov/zion/planyourvisit/conditions.htm",plan:{v:1,park:"zion",month:"nov",days:2,stay:"camping",load:["fridge","phones"],recharge:"none",method:"none",vehicleConfirmed:false,portableAway:false,fridgeW:18,fridgeModel:"bodega-t36",fridgePlug:"cigarette",fridgePeak:"",fridgeOwned:"no",unchecked:["warm"],sample:false}};}
+function planBody(email){return {requestedOnly:true,email,printSnapshot:samplePrintSnapshot(),turnstileToken:"plan-token",pageUrl:SITE+"/which-national-parks-are-open-in-winter/",npsUrl:"https://www.nps.gov/zion/planyourvisit/conditions.htm",plan:{v:1,park:"zion",month:"nov",days:2,stay:"camping",load:["fridge","phones"],recharge:"none",method:"none",vehicleConfirmed:false,portableAway:false,fridgeW:18,fridgeModel:"bodega-t36",fridgePlug:"cigarette",fridgePeak:"",fridgeOwned:"no",unchecked:["warm"],sample:false}};}
 const originally=globalThis.fetch;
 globalThis.fetch=fakeFetch;
   test("health reports binding configuration without sending or exposing secrets",async()=>{
@@ -78,15 +107,18 @@ globalThis.fetch=fakeFetch;
     assert.equal(contacts.size,0);assert.equal(emails.length,1);
     assert.match(emails[0].text,/Official NPS/);assert.match(emails[0].text,/not subscribe/);
     assert.doesNotMatch(emails[0].text,/plan@example.com/);
-    assert.match(emails[0].text,/attached as a PDF/);
+    assert.match(emails[0].text,/PDF is attached/);
     assert.doesNotMatch(emails[0].text,/Open plan and print PDF/);
-    assert.equal(emails[0].attachments[0].filename,"PARKMEMOIR_Trip_and_Power_Plan.pdf");
+    assert.equal(emails[0].attachments[0].filename,"PARKMEMOIR_Full_Winter_Trip_Plan.pdf");
     const pdf=atob(emails[0].attachments[0].content);
-    assert.match(pdf,/^%PDF-1\.4/);
-    assert.match(pdf,/xref\n0 \d+/);
-    assert.match(pdf,/%%EOF\n$/);
-    assert.match(pdf,/National park: zion/);
-    assert.match(pdf,/OFFICIAL NPS INFORMATION/);
+    assert.equal(pdf,examplePdfFixture());
+    assert.equal(browserCalls[0].action,"pdf");
+    assert.match(browserCalls[0].args.html,/Your packing checklist/);
+    assert.match(browserCalls[0].args.html,/Affiliate disclosure/);
+    assert.match(browserCalls[0].args.html,/Recommended products/);
+    assert.match(browserCalls[0].args.html,/Access &amp; stay notes/);
+    assert.match(browserCalls[0].args.html,/pboost.me\/sample/);
+    assert.equal(browserCalls[0].args.pdfOptions.format,"a4");
   });
   test("DOI email remains pending until human POST; a GET does not subscribe",async()=>{
     const r=await route(post("/api/seasonal-subscribe",signup("member@example.com"),SITE,"6.6.6.6"),env);
@@ -114,18 +146,24 @@ globalThis.fetch=fakeFetch;
     assert.equal(contacts.get("no-origin@example.com").segments.has(env.SEASONAL_SEGMENT_ID),true);
     assert.equal((await route(form(),env)).status,410);
   });
-  test("PDF generation paginates long checklists without external dependencies",()=>{
-    const plan=planBody("pdf@example.com").plan;
-    const huge={...plan,unchecked:Array.from({length:50},(_,i)=>"step-"+i+"-verify-gear-and-conditions")};
-    const pdf=buildPlanPdf(huge,"https://www.nps.gov/zion/planyourvisit/conditions.htm");
-    assert.match(pdf,/^%PDF-1\.4/);
-    assert.match(pdf,/\/Count [2-9] /);
-    assert.match(pdf,/step 49 verify gear and conditions/);
-    assert.match(pdf,/%%EOF\n$/);
-    // All object byte offsets must be within the generated file bounds.
-    const offsets=[...pdf.matchAll(/(\d{10}) 00000 n /g)].map(m=>Number(m[1]));
-    assert.ok(offsets.length>=7);
-    assert.ok(offsets.every(n=>n>0&&n<pdf.length));
+  test("rejects incomplete summary-only and unsafe HTML snapshots",async()=>{
+    const body=planBody("not-full@example.com");
+    const before=browserCalls.length;
+    const missing=await route(post("/api/send-plan",{...body,printSnapshot:undefined},SITE,"17.17.17.17"),env);
+    assert.equal(missing.status,400);assert.equal(browserCalls.length,before);
+    const summary=await route(post("/api/send-plan",{...body,printSnapshot:{...body.printSnapshot,markup:"<section id=\"print-plan\">Short summary</section>"}},SITE,"17.17.17.17"),env);
+    assert.equal(summary.status,400);
+    const malicious=await route(post("/api/send-plan",{...body,printSnapshot:{...body.printSnapshot,markup:body.printSnapshot.markup+"<script>alert(1)</script>"}},SITE,"17.17.17.17"),env);
+    assert.equal(malicious.status,400);
+    const remoteImage=await route(post("/api/send-plan",{...body,printSnapshot:{...body.printSnapshot,markup:body.printSnapshot.markup+'<img src="https://evil.example/collect" />'}},SITE,"17.17.17.17"),env);
+    assert.equal(remoteImage.status,400);
+    assert.equal(browserCalls.length,before);
+  });
+  test("full printable report yields a genuine PDF response via browser binding",async()=>{
+    const report=samplePrintSnapshot();
+    const pdf=await renderFullPrintPdf(env,report);
+    assert.equal(pdf.filename,"PARKMEMOIR_Full_Winter_Trip_Plan.pdf");
+    assert.equal(atob(pdf.content),examplePdfFixture());
   });
   test("marketing consent is required and unsubscribed contacts cannot be reactivated",async()=>{
     const denied=await route(post("/api/seasonal-subscribe",{...signup("skip@example.com"),consent:false},SITE,"7.7.7.7"),env);
