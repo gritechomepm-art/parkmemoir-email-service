@@ -1,0 +1,14 @@
+{
+  "name": "parkmemoir-email-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated Cloudflare Worker with transactional plan mail and optional double opt-in",
+  "scripts": {
+    "test": "node --test worker.test.mjs",
+    "check": "node --check worker.mjs && node --check worker.test.mjs"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

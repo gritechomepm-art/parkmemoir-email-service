@@ -1,0 +1,27 @@
+name: Email service source CI (no deployment)
+
+on:
+  push:
+    branches: [main, "feature/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Configure Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Syntax validation
+        run: |
+          node --check worker.mjs
+          node --check worker.test.mjs
+      - name: Mocked email + DOI tests (no credentials)
+        run: node --test worker.test.mjs
