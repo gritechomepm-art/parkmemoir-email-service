@@ -166,6 +166,11 @@ async function confirm(request,env){
 }
 async function execute(request,env) {
   const pathname=new URL(request.url).pathname;
+  if(pathname==="/health" && request.method==="GET") {
+    // Binding presence only: no mail, database reads, or private values are exposed.
+    const configured=baseReady(env) && Boolean(env.RESEND_CONTACTS_API_KEY&&env.SEASONAL_SEGMENT_ID&&env.SEASONAL_TOPIC_ID);
+    return respond(configured?200:503,{ok:configured,service:"parkmemoir-email",status:configured?"configured":"missing_config"});
+  }
   if(request.method==="OPTIONS") {
     if(!ORIGINS.has(request.headers.get("Origin"))||!["/api/send-plan","/api/seasonal-subscribe"].includes(pathname))return respond(403,{ok:false,error:"Origin not allowed"});
     return cors(request,new Response(null,{status:204,headers:baseHeaders}));
