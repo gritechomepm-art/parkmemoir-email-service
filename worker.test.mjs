@@ -2,7 +2,7 @@ import test, {after} from "node:test";
 import assert from "node:assert/strict";
 import {DatabaseSync} from "node:sqlite";
 import {readFileSync} from "node:fs";
-import {route,cleanupExpired} from "./worker.mjs";
+import {route,cleanupExpired,buildPlanPdf} from "./worker.mjs";
 const SERVICE="https://email.parkmemoir.com";
 const SITE="https://parkmemoir.com";
 const db=new DatabaseSync(":memory:");
@@ -78,6 +78,15 @@ globalThis.fetch=fakeFetch;
     assert.equal(contacts.size,0);assert.equal(emails.length,1);
     assert.match(emails[0].text,/Official NPS/);assert.match(emails[0].text,/not subscribe/);
     assert.doesNotMatch(emails[0].text,/plan@example.com/);
+    assert.match(emails[0].text,/PDF is attached/);
+    assert.doesNotMatch(emails[0].text,/Open plan and print PDF/);
+    assert.equal(emails[0].attachments[0].filename,"PARKMEMOIR_Trip_and_Power_Plan.pdf");
+    const pdf=atob(emails[0].attachments[0].content);
+    assert.match(pdf,/^%PDF-1\.4/);
+    assert.match(pdf,/xref\n0 \d+/);
+    assert.match(pdf,/%%EOF\n$/);
+    assert.match(pdf,/National park: zion/);
+    assert.match(pdf,/Official NPS/);
   });
   test("DOI email remains pending until human POST; a GET does not subscribe",async()=>{
     const r=await route(post("/api/seasonal-subscribe",signup("member@example.com"),SITE,"6.6.6.6"),env);
@@ -95,6 +104,28 @@ globalThis.fetch=fakeFetch;
     assert.equal(contacts.get("member@example.com").topics.get(env.SEASONAL_TOPIC_ID),"opt_in");
     assert.equal(db.prepare("SELECT status FROM pm_seasonal_consent WHERE email=?").get("member@example.com").status,"confirmed");
     assert.equal((await route(proper(),env)).status,410);
+  });
+  test("in-app email browsers with absent Origin can submit a valid confirmation token",async()=>{
+    const r=await route(post("/api/seasonal-subscribe",signup("no-origin@example.com"),SITE,"16.16.16.16"),env);
+    assert.equal(r.status,202);
+    const token=emails.at(-1).text.match(/seasonal-confirm\?token=([0-9a-f]{64})/)[1];
+    const form=()=>new Request(SERVICE+"/api/seasonal-confirm",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded","Sec-Fetch-Site":"same-origin"},body:new URLSearchParams({token})});
+    assert.equal((await route(form(),env)).status,200);
+    assert.equal(contacts.get("no-origin@example.com").segments.has(env.SEASONAL_SEGMENT_ID),true);
+    assert.equal((await route(form(),env)).status,410);
+  });
+  test("PDF generation paginates long checklists without external dependencies",()=>{
+    const plan=planBody("pdf@example.com").plan;
+    const huge={...plan,unchecked:Array.from({length:50},(_,i)=>"step-"+i+"-verify-gear-and-conditions")};
+    const pdf=buildPlanPdf(huge,"https://www.nps.gov/zion/planyourvisit/conditions.htm");
+    assert.match(pdf,/^%PDF-1\.4/);
+    assert.match(pdf,/\/Count [2-9] /);
+    assert.match(pdf,/step-49-verify-gear-and-conditions/);
+    assert.match(pdf,/%%EOF\n$/);
+    // All object byte offsets must be within the generated file bounds.
+    const offsets=[...pdf.matchAll(/(\d{10}) 00000 n /g)].map(m=>Number(m[1]));
+    assert.ok(offsets.length>=7);
+    assert.ok(offsets.every(n=>n>0&&n<pdf.length));
   });
   test("marketing consent is required and unsubscribed contacts cannot be reactivated",async()=>{
     const denied=await route(post("/api/seasonal-subscribe",{...signup("skip@example.com"),consent:false},SITE,"7.7.7.7"),env);
