@@ -208,7 +208,7 @@ async function plan(request,env){
   const recipient=d.email.trim().toLowerCase();
   // Resend deduplicates repeated identical requests within 24 hours.
   // Never put a raw email address or unkeyed identifying hash in request headers.
-  const key="pm-plan-"+await digest([env.RATE_HASH_SECRET,recipient,JSON.stringify(d.plan),base,nps,Math.floor(now()/600)].join("|"));
+  const key="pm-plan-pdf-v1-"+await digest(["pdf-v1",env.RATE_HASH_SECRET,recipient,JSON.stringify(d.plan),base,nps,Math.floor(now()/600)].join("|"));
   const result=await resend(env,"/emails","POST",{from:env.EMAIL_FROM,to:[recipient],...message},{idempotencyKey:key});
   return result.ok?respond(200,{ok:true,status:"accepted"}):respond(502,{ok:false,error:"Provider did not accept email"});
 }
