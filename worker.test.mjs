@@ -152,7 +152,7 @@ globalThis.fetch=fakeFetch;
   test("email-confirm POST accepts a valid one-time token despite unusual browser navigation headers",async()=>{
     const r=await route(post("/api/seasonal-subscribe",signup("browser-headers@example.com"),SITE,"19.19.19.19"),env);
     assert.equal(r.status,202);
-    const token=emails.at(-1).text.match(/seasonal-confirm\\?token=([0-9a-f]{64})/)[1];
+    const token=emails.at(-1).text.match(/seasonal-confirm\?token=([0-9a-f]{64})/)[1];
     const form=()=>new Request(SERVICE+"/api/seasonal-confirm",{method:"POST",
       headers:{"Origin":"null","Sec-Fetch-Site":"cross-site","Content-Type":"application/x-www-form-urlencoded"},
       body:new URLSearchParams({token})});
