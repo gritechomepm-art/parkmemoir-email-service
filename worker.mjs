@@ -191,12 +191,11 @@ function landing(request){
 async function confirm(request,env){
   if(request.method==="GET")return landing(request);
   if(!baseReady(env)||!env.SEASONAL_SEGMENT_ID||!env.SEASONAL_TOPIC_ID||!env.RESEND_CONTACTS_API_KEY)return page(503,"Unavailable","<p>Service is not configured.</p>");
-  // Email in-app browsers may omit Origin on same-origin form submissions.
-  // The 256-bit email-only token is the actual confirmation proof.
-  const origin=request.headers.get("Origin");
-  const fetchSite=request.headers.get("Sec-Fetch-Site");
-  if((origin&&origin!==SERVICE)||(fetchSite&&fetchSite==="cross-site"))
-    return page(403,"Not allowed","<p>Open the email link and use its confirmation button.</p>");
+  // This is a token-authenticated, one-time, email-only confirmation POST.
+  // Some email clients and privacy tools supply unusual Origin/Sec-Fetch-Site
+  // navigation headers. These are advisory, not the proof of authorization.
+  // Fail closed on absent/malformed/expired/reused 256-bit tokens below.
+  // GET remains read-only; the user must explicitly submit this POST form.
   if(!request.headers.get("Content-Type")?.startsWith("application/x-www-form-urlencoded"))return page(415,"Invalid form","<p>Use the confirmation button.</p>");
   const raw=await request.text();if(raw.length>250)return page(413,"Invalid form","<p>Form too large.</p>");
   const token=new URLSearchParams(raw).get("token");if(!validToken(token))return page(400,"Invalid link","<p>Request a new link.</p>");
