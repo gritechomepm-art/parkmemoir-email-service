@@ -50,7 +50,7 @@ function validPlan(p) {
   return p&&typeof p==="object"&&!Array.isArray(p)&&p.v===1&&!Object.keys(p).some(k=>!keys.has(k))
     &&typeof p.park==="string"&&/^[a-z0-9-]{2,50}$/.test(p.park)&&months.has(p.month)&&Number.isInteger(p.days)&&p.days>=1&&p.days<=14
     &&stays.has(p.stay)&&Array.isArray(p.load)&&p.load.length<=6&&new Set(p.load).size===p.load.length&&p.load.every(x=>devices.has(x))
-    &&typeof p.recharge==="string"&&p.recharge.length<=12&&["none","daily","2","3","4","5","6","7","8","9","10","11","12","13","14"].includes(p.recharge)
+    &&typeof p.recharge==="string"&&p.recharge.length<=12&&["none","daily","1","2","3","4","5","6","7","8","9","10","11","12","13","14"].includes(p.recharge)
     &&["none","wall","solar","vehicle"].includes(p.method)&&typeof p.vehicleConfirmed==="boolean"&&typeof p.portableAway==="boolean"
     &&typeof p.fridgeW==="number"&&Number.isFinite(p.fridgeW)&&p.fridgeW>=5&&p.fridgeW<=100
     &&fridgeModels.has(p.fridgeModel)&&["unknown","cigarette","other"].includes(p.fridgePlug)
