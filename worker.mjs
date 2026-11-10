@@ -7,9 +7,10 @@ const enc = new TextEncoder();
 const baseHeaders = {"Cache-Control":"no-store, private","Referrer-Policy":"no-referrer","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY"};
 const respond = (status, data) => new Response(JSON.stringify(data),{status,headers:{...baseHeaders,"Content-Type":"application/json; charset=utf-8"}});
 const esc = x => String(x).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-function page(status,title,body) {
+function page(status,title,body,{nonce}={}) {
   const source = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(title)+' · PARKMEMOIR</title></head><body style="font:17px/1.5 system-ui;background:#f7f3ec;padding:25px;color:#292a24"><main style="max-width:640px;margin:auto;background:white;padding:25px;border:1px solid #ddd0bc;border-radius:12px"><h1>'+esc(title)+'</h1>'+body+'<p><a href="'+SITE+'/which-national-parks-are-open-in-winter/">Back to the trip planner</a></p></main></body></html>';
-  return new Response(source,{status,headers:{...baseHeaders,"Content-Type":"text/html; charset=utf-8","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action "+SERVICE+"; base-uri 'none'; frame-ancestors 'none'","X-Robots-Tag":"noindex, nofollow"}});
+  const csp="default-src 'none'; style-src 'unsafe-inline'; form-action "+SERVICE+"; base-uri 'none'; frame-ancestors 'none'"+(nonce?"; script-src 'nonce-"+nonce+"'; connect-src 'self'":"");
+  return new Response(source,{status,headers:{...baseHeaders,"Content-Type":"text/html; charset=utf-8","Content-Security-Policy":csp,"X-Robots-Tag":"noindex, nofollow"}});
 }
 function cors(request,response) {
   const origin=request.headers.get("Origin");
@@ -176,8 +177,10 @@ async function subscribe(request,env){
   const result=await env.SUBSCRIBERS.prepare("INSERT INTO pm_seasonal_consent(email,status,token_hash,consent_version,source_path,requested_at,expires_at,updated_at) VALUES(?,'pending',?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET token_hash=excluded.token_hash, consent_version=excluded.consent_version, source_path=excluded.source_path, requested_at=excluded.requested_at, expires_at=excluded.expires_at, confirmation_sent_at=NULL, updated_at=excluded.updated_at WHERE pm_seasonal_consent.status='pending' AND pm_seasonal_consent.requested_at<?").bind(email,tokenHash,CONSENT,path,n,n+172800,n,n-3600).run();
   const accepted=()=>respond(202,{ok:true,status:"check_inbox_if_eligible"});
   if(!result.meta?.changes)return accepted();
-  const link=SERVICE+"/api/seasonal-confirm?token="+token;
-  const body={from:env.EMAIL_FROM,to:[email],subject:"Confirm your PARKMEMOIR seasonal updates",text:"You requested occasional national park updates, separate from your trip plan email.\n\nOpen "+link+" and click Confirm subscription. This link expires in 48 hours. If this was not you, ignore it.\n\nThis is not a road-closure alert service."};
+  const link=SERVICE+"/api/seasonal-confirm?token="+token+"#confirm";
+  const body={from:env.EMAIL_FROM,to:[email],subject:"Confirm your PARKMEMOIR seasonal updates",
+    text:"You requested occasional national park updates, separate from your trip plan email.\n\nConfirm your subscription with this one-click link:\n"+link+"\n\nThis link expires in 48 hours. If this was not you, ignore it. This is not a road-closure alert service.",
+    html:'<main style="font:16px/1.6 system-ui;max-width:600px;padding:22px"><h1>Confirm your PARKMEMOIR seasonal updates</h1><p>You requested occasional national park and packing updates. This is optional and separate from your trip plan email.</p><p><a href="'+esc(link)+'" style="display:inline-block;padding:12px 20px;background:#62422c;color:white;text-decoration:none;border-radius:7px;font-weight:700">Confirm my subscription</a></p><p style="font-size:13px;color:#555">One click completes your confirmation in your browser. Link expires in 48 hours. If you did not request this, ignore it.</p></main>'};
   let sent;try{sent=await resend(env,"/emails","POST",body);}catch{}
   if(!sent?.ok){await env.SUBSCRIBERS.prepare("DELETE FROM pm_seasonal_consent WHERE email=? AND token_hash=? AND status='pending'").bind(email,tokenHash).run();return respond(502,{ok:false,error:"Confirmation email not accepted"});}
   await env.SUBSCRIBERS.prepare("UPDATE pm_seasonal_consent SET confirmation_sent_at=?,updated_at=? WHERE email=? AND token_hash=? AND status='pending'").bind(n,n,email,tokenHash).run();
@@ -186,7 +189,31 @@ async function subscribe(request,env){
 function landing(request){
   const token=new URL(request.url).searchParams.get("token");
   if(!validToken(token))return page(400,"Invalid link","<p>Request a new confirmation email.</p>");
-  return page(200,"Confirm seasonal updates",'<p>Optional national park season and packing updates only; not automatic alerts.</p><form method="POST" action="'+SERVICE+'/api/seasonal-confirm"><input type="hidden" name="token" value="'+token+'"><button style="padding:13px;background:#62422c;color:white;border:0;border-radius:8px" type="submit">Confirm subscription</button></form><p>Opening this page alone does not subscribe you.</p>');
+  // The fragment #confirm never reaches the server. Email link scanners performing
+  // plain GET cannot change consent. Only a browser that follows the explicit
+  // email button and executes the short, nonce-authorized script POSTs the token.
+  // A manual POST fallback remains available when JavaScript is disabled.
+  const nonce=random();
+  const script='(async()=>{'+
+    'if(location.hash!=="#confirm")return;'+
+    'const f=document.getElementById("pm-doi-form"),s=document.getElementById("pm-doi-status");'+
+    'const b=f.querySelector("button");b.hidden=true;s.textContent="Confirming your subscription…";'+
+    'try{'+
+      'const p=new URLSearchParams(new FormData(f));'+
+      'const r=await fetch(f.action,{method:"POST",body:p,headers:{"Content-Type":"application/x-www-form-urlencoded"},credentials:"same-origin",cache:"no-store"});'+
+      'try{history.replaceState(null,"",location.pathname)}catch{}'+
+      'if(r.ok){s.textContent="Subscription confirmed. Thank you.";f.remove();document.title="Subscription confirmed · PARKMEMOIR";return;}'+
+      'if(r.status===410){s.textContent="This confirmation link has expired or has already been used. Request a new email.";f.remove();return;}'+
+      's.textContent="Confirmation could not be completed. Try again below.";b.hidden=false;'+
+    '}catch{s.textContent="Confirmation could not be completed. Try again below.";b.hidden=false;}'+
+  '})();';
+  const form='<p id="pm-doi-status" role="status">Your seasonal updates confirmation is ready.</p>'+
+    '<form id="pm-doi-form" method="POST" action="'+SERVICE+'/api/seasonal-confirm">'+
+    '<input type="hidden" name="token" value="'+token+'">'+
+    '<button style="padding:13px;background:#62422c;color:white;border:0;border-radius:8px" type="submit">Confirm manually if needed</button></form>'+
+    '<p style="font-size:13px">This confirmation requires the email-only token. A preview of the link never subscribes you.</p>'+
+    '<script nonce="'+nonce+'">'+script+'</script>';
+  return page(200,"Confirm seasonal updates",form,{nonce});
 }
 async function confirm(request,env){
   if(request.method==="GET")return landing(request);
@@ -220,7 +247,7 @@ async function confirm(request,env){
     // must explicitly opt the confirmed contact into this topic before segment membership.
     stage="topic_opt_in";
     const topic=await resend(env,"/contacts/"+encodeURIComponent(id)+"/topics","PATCH",
-      {topics:[{id:env.SEASONAL_TOPIC_ID,subscription:"opt_in"}]},{contacts:true});
+      [{id:env.SEASONAL_TOPIC_ID,subscription:"opt_in"}],{contacts:true});
     if(!topic.ok)throw Error("topic");
     stage="segment_add";
     const segment=await resend(env,"/contacts/"+encodeURIComponent(id)+"/segments/"+encodeURIComponent(env.SEASONAL_SEGMENT_ID),"POST",undefined,{contacts:true});

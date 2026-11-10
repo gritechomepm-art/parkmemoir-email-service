@@ -67,9 +67,15 @@ const fakeFetch=async(url,opts={})=>{
     if(topicFails)return Response.json({error:"topic error"},{status:503});
     const c=[...contacts.values()].find(x=>x.id===decodeURIComponent(topic[1]));assert.ok(c);
     c.topics??=new Map();
-    assert.deepEqual(Object.keys(body),["topics"]);
-    assert.equal(Array.isArray(body.topics),true);
-    for(const t of body.topics)c.topics.set(t.id,t.subscription);
+    // Official Resend REST endpoint PATCH /contacts/:id/topics requires a JSON array,
+    // not the SDK wrapper {topics:[...]}; reject the wrapper to catch the live 503 bug.
+    if(!Array.isArray(body))return Response.json({error:"topics must be an array"},{status:422});
+    for(const t of body) {
+      assert.deepEqual(Object.keys(t).sort(),["id","subscription"]);
+      assert.match(t.id,/^[0-9a-f-]{36}$/);
+      assert.ok(["opt_in","opt_out"].includes(t.subscription));
+      c.topics.set(t.id,t.subscription);
+    }
     return Response.json({object:"contact_topics"});
   }
   const m=path.match(/^\/contacts\/([^/]+)\/segments\/([^/]+)$/);
@@ -123,10 +129,24 @@ globalThis.fetch=fakeFetch;
   test("DOI email remains pending until human POST; a GET does not subscribe",async()=>{
     const r=await route(post("/api/seasonal-subscribe",signup("member@example.com"),SITE,"6.6.6.6"),env);
     assert.equal(r.status,202);assert.equal(contacts.size,0);
-    const match=emails.at(-1).text.match(/seasonal-confirm\?token=([0-9a-f]{64})/);assert.ok(match);
+    const msg=emails.at(-1);
+    assert.match(msg.text,/one-click link/);
+    assert.match(msg.text,/#confirm/);
+    assert.match(msg.html,/Confirm my subscription/);
+    assert.match(msg.html,/#confirm/);
+    const match=msg.text.match(/seasonal-confirm\?token=([0-9a-f]{64})/);assert.ok(match);
     const token=match[1],u=SERVICE+"/api/seasonal-confirm?token="+token;
     const view=await route(new Request(u),env);
-    assert.equal(view.status,200);assert.match(await view.text(),/Confirm subscription/);
+    assert.equal(view.status,200);
+    const markup=await view.text();
+    assert.match(markup,/Confirm manually if needed/);
+    assert.match(markup,/location\.hash!==\"#confirm\"/);
+    assert.match(markup,/fetch\(f.action/);
+    assert.match(view.headers.get("Content-Security-Policy"),/script-src 'nonce-[a-f0-9]{64}'/);
+    assert.match(view.headers.get("Content-Security-Policy"),/connect-src 'self'/);
+    const script=markup.match(/<script nonce="[a-f0-9]{64}">([\s\S]*?)<\/script>/);
+    assert.ok(script);
+    assert.doesNotThrow(()=>new Function(script[1]),"Auto-confirm browser script must parse correctly");
     assert.equal(db.prepare("SELECT status FROM pm_seasonal_consent WHERE email=?").get("member@example.com").status,"pending");
     // Cross-origin-looking browser headers alone cannot authorize a signup;
     // a valid one-time email token (not Origin) is the actual proof.
@@ -139,6 +159,21 @@ globalThis.fetch=fakeFetch;
     assert.equal(contacts.get("member@example.com").topics.get(env.SEASONAL_TOPIC_ID),"opt_in");
     assert.equal(db.prepare("SELECT status FROM pm_seasonal_consent WHERE email=?").get("member@example.com").status,"confirmed");
     assert.equal((await route(proper(),env)).status,410);
+  });
+  test("link preview and email scanner GETs remain read-only before any user POST",async()=>{
+    const r=await route(post("/api/seasonal-subscribe",signup("scanner@example.com"),SITE,"20.20.20.20"),env);
+    assert.equal(r.status,202);
+    const token=emails.at(-1).text.match(/seasonal-confirm\?token=([0-9a-f]{64})/)[1];
+    const before=contacts.size;
+    const url=SERVICE+"/api/seasonal-confirm?token="+token+"#confirm";
+    const fromScanner=await route(new Request(url,{headers:{"User-Agent":"SecurityLinkScanner"}}),env);
+    assert.equal(fromScanner.status,200);
+    assert.equal(contacts.size,before);
+    assert.equal(db.prepare("SELECT status FROM pm_seasonal_consent WHERE email=?").get("scanner@example.com").status,"pending");
+    const humanPost=()=>new Request(SERVICE+"/api/seasonal-confirm",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({token})});
+    assert.equal((await route(humanPost(),env)).status,200);
+    assert.equal(db.prepare("SELECT status FROM pm_seasonal_consent WHERE email=?").get("scanner@example.com").status,"confirmed");
+    assert.equal((await route(humanPost(),env)).status,410);
   });
   test("in-app email browsers with absent Origin can submit a valid confirmation token",async()=>{
     const r=await route(post("/api/seasonal-subscribe",signup("no-origin@example.com"),SITE,"16.16.16.16"),env);
