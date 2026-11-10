@@ -128,8 +128,11 @@ globalThis.fetch=fakeFetch;
     const view=await route(new Request(u),env);
     assert.equal(view.status,200);assert.match(await view.text(),/Confirm subscription/);
     assert.equal(db.prepare("SELECT status FROM pm_seasonal_consent WHERE email=?").get("member@example.com").status,"pending");
-    const wrong=new Request(SERVICE+"/api/seasonal-confirm",{method:"POST",headers:{"Origin":"https://evil.example","Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({token})});
-    assert.equal((await route(wrong,env)).status,403);
+    // Cross-origin-looking browser headers alone cannot authorize a signup;
+    // a valid one-time email token (not Origin) is the actual proof.
+    const wrong=new Request(SERVICE+"/api/seasonal-confirm",{method:"POST",headers:{"Origin":"https://evil.example","Sec-Fetch-Site":"cross-site","Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({token:"not-a-valid-token"})});
+    assert.equal((await route(wrong,env)).status,400);
+    assert.equal(db.prepare("SELECT status FROM pm_seasonal_consent WHERE email=?").get("member@example.com").status,"pending");
     const proper=()=>new Request(SERVICE+"/api/seasonal-confirm",{method:"POST",headers:{"Origin":SERVICE,"Content-Type":"application/x-www-form-urlencoded"},body:new URLSearchParams({token})});
     assert.equal((await route(proper(),env)).status,200);
     assert.equal(contacts.get("member@example.com").segments.has(env.SEASONAL_SEGMENT_ID),true);
@@ -145,6 +148,24 @@ globalThis.fetch=fakeFetch;
     assert.equal((await route(form(),env)).status,200);
     assert.equal(contacts.get("no-origin@example.com").segments.has(env.SEASONAL_SEGMENT_ID),true);
     assert.equal((await route(form(),env)).status,410);
+  });
+  test("email-confirm POST accepts a valid one-time token despite unusual browser navigation headers",async()=>{
+    const r=await route(post("/api/seasonal-subscribe",signup("browser-headers@example.com"),SITE,"19.19.19.19"),env);
+    assert.equal(r.status,202);
+    const token=emails.at(-1).text.match(/seasonal-confirm\\?token=([0-9a-f]{64})/)[1];
+    const form=()=>new Request(SERVICE+"/api/seasonal-confirm",{method:"POST",
+      headers:{"Origin":"null","Sec-Fetch-Site":"cross-site","Content-Type":"application/x-www-form-urlencoded"},
+      body:new URLSearchParams({token})});
+    const response=await route(form(),env);
+    assert.equal(response.status,200);
+    assert.match(await response.text(),/Subscription confirmed/);
+    const row=db.prepare("SELECT status,confirmed_at,contact_id FROM pm_seasonal_consent WHERE email=?").get("browser-headers@example.com");
+    assert.equal(row.status,"confirmed");
+    assert.ok(row.confirmed_at);
+    assert.ok(row.contact_id);
+    assert.equal(contacts.get("browser-headers@example.com").segments.has(env.SEASONAL_SEGMENT_ID),true);
+    assert.equal(contacts.get("browser-headers@example.com").topics.get(env.SEASONAL_TOPIC_ID),"opt_in");
+    assert.equal((await route(form(),env)).status,410,"One-time token must not be reusable");
   });
   test("rejects incomplete summary-only and unsafe HTML snapshots",async()=>{
     const body=planBody("not-full@example.com");
