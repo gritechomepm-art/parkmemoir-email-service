@@ -59,12 +59,12 @@ function validPlan(p) {
     &&["yes","no"].includes(p.fridgeOwned)&&typeof p.sample==="boolean"
     &&Array.isArray(p.unchecked)&&p.unchecked.length<=50&&p.unchecked.every(x=>typeof x==="string"&&x.length<=80&&/^[a-z-]+$/.test(x));
 }
-async function verified(request,env,token,action) {
+async function verified(request,env,token,action,hostnames=["parkmemoir.com","www.parkmemoir.com"]) {
   if(!env.TURNSTILE_SECRET_KEY||typeof token!=="string"||token.length<4||token.length>2048)return false;
   const body=new URLSearchParams({secret:env.TURNSTILE_SECRET_KEY,response:token});
   const ip=request.headers.get("CF-Connecting-IP");if(ip)body.set("remoteip",ip);
   try {const r=await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify",{method:"POST",body});
-    if(!r.ok)return false;const d=await r.json();return d.success===true&&["parkmemoir.com","www.parkmemoir.com"].includes(d.hostname)&&d.action===action;
+    if(!r.ok)return false;const d=await r.json();return d.success===true&&hostnames.includes(d.hostname)&&d.action===action;
   }catch{return false;}
 }
 async function rate(request,env,category,max) {
@@ -173,7 +173,10 @@ async function subscribe(request,env){
   if(!email||!source||d.consent!==true||d.consentVersion!==CONSENT)return respond(400,{ok:false,error:"Consent required"});
   if(!await verified(request,env,d.turnstileToken,"seasonal_signup"))return respond(403,{ok:false,error:"Verification failed"});
   if(!await rate(request,env,"seasonal",6))return respond(429,{ok:false,error:"Rate limit"});
-  const n=now(),token=random(),tokenHash=await digest(token),path=new URL(source).pathname;
+  return requestSeasonalConsent(env,email,new URL(source).pathname);
+}
+async function requestSeasonalConsent(env,email,path){
+  const n=now(),token=random(),tokenHash=await digest(token);
   const result=await env.SUBSCRIBERS.prepare("INSERT INTO pm_seasonal_consent(email,status,token_hash,consent_version,source_path,requested_at,expires_at,updated_at) VALUES(?,'pending',?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET token_hash=excluded.token_hash, consent_version=excluded.consent_version, source_path=excluded.source_path, requested_at=excluded.requested_at, expires_at=excluded.expires_at, confirmation_sent_at=NULL, updated_at=excluded.updated_at WHERE pm_seasonal_consent.status='pending' AND pm_seasonal_consent.requested_at<?").bind(email,tokenHash,CONSENT,path,n,n+172800,n,n-3600).run();
   const accepted=()=>respond(202,{ok:true,status:"check_inbox_if_eligible"});
   if(!result.meta?.changes)return accepted();
@@ -265,8 +268,92 @@ async function confirm(request,env){
     return page(503,"Confirmation incomplete","<p>Your subscription could not be completed. Retry this link or contact the site owner.</p>");
   }
 }
+const fitPath="/gear/12v-car-fridge-suv-fit-power-planner/";
+const fitCore=["depth","width","height","length","fridgeWidth","fridgeHeight"];
+const fitTailgate=["hatchWidth","hatchHeight"];
+const fitExtra=["extraLength","extraWidth","extraHeight","openHeight"];
+const fitNames={t36:"BODEGA T36","t36-t":"BODEGA T36-T",t50t:"BODEGA T50T",t60:"BODEGA T60",mcd15:"BODEGA MCD15",custom:"Custom fridge"};
+const vehicleNames={crosstrek:"2025 Subaru Crosstrek AWD",rav4:"2025 Toyota RAV4 LE",crv:"2025 Honda CR-V",highlander:"2025 Toyota Highlander",sienna:"2025 Toyota Sienna",custom:"Custom vehicle"};
+const fitLabels={"paper-fit":"Paper fit","likely-fit":"Likely fit — verify tailgate","tight-fit":"Tight fit","unlikely-fit":"Unlikely fit"};
+const fitPower=["none","c1000","c2000","c2000-expansion"];
+
+function normalizeFit(s){
+  if(!s||s.v!==1||!["in","cm"].includes(s.unit)||!Object.hasOwn(fitNames,s.fridge)
+    ||!Object.hasOwn(vehicleNames,s.vehicle)||!Object.hasOwn(fitLabels,s.result)
+    ||typeof s.across!=="boolean"||!s.values||typeof s.values!=="object"||Array.isArray(s.values)
+    ||!Array.isArray(s.references)||s.references.length>3||new Set(s.references).size!==s.references.length
+    ||s.references.some(key=>!["depth","width","height"].includes(key))
+    ||!fitPower.includes(s.power??"none"))return null;
+  const values={},limit=s.unit==="in"?300:762;
+  for(const key of [...fitCore,...fitTailgate,...fitExtra]){
+    const raw=s.values[key],required=fitCore.includes(key);
+    if(raw===""&&!required){values[key]="";continue;}
+    if(typeof raw!=="string"||raw.length>24||!raw.trim()||!Number.isFinite(Number(raw))
+      ||Number(raw)<0||Number(raw)>limit+1e-8||((required||fitTailgate.includes(key))&&Number(raw)===0))return null;
+    values[key]=String(Number(raw));
+  }
+  const uncheckedTailgate=fitTailgate.some(key=>values[key]==="");
+  if((s.result==="paper-fit"&&uncheckedTailgate)||(s.result==="likely-fit"&&!uncheckedTailgate))return null;
+  return {v:1,unit:s.unit,values,fridge:s.fridge,vehicle:s.vehicle,references:s.references,across:s.across,power:s.power??"none",result:s.result};
+}
+
+function fitEmailPage(env) {
+  const sitekey=env.FIT_TURNSTILE_SITE_KEY;
+  if(typeof sitekey!=="string"||!/^[A-Za-z0-9_-]{8,128}$/.test(sitekey))return page(503,"Fit email unavailable","<p>Copy the result from the cargo fit tool for now.</p>");
+  const nonce=random();
+  const html='<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Email your fit check · PARKMEMOIR</title><style>body{margin:0;background:#f7f1e8;color:#2e2a24;font:16px/1.55 system-ui,sans-serif}main{max-width:34rem;padding:1.25rem;margin:2rem auto;background:#fffdf9;border-radius:.75rem}label{display:block;margin:1rem 0}input[type=email]{display:block;width:min(100%,23rem);box-sizing:border-box;padding:.6rem;font:inherit}button{font:inherit;padding:.55rem .8rem}a{color:#764220}</style>'+
+    '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script></head><body><main><h1>Email me this fit check</h1><p>Get one copy of your cargo fit result and a link to reopen it.</p>'+
+    '<form method="post" action="/api/send-fit" id="fit-mail"><label>Email address<input type="email" name="email" autocomplete="email" maxlength="254" required></label>'+
+    '<label><input type="checkbox" name="seasonal"> Also send me seasonal park planning updates. A separate confirmation is required.</label>'+
+    '<div class="cf-turnstile" data-sitekey="'+esc(sitekey)+'" data-action="email_fit"></div>'+
+    '<button type="submit" disabled>Email my fit check</button></form><p id="fit-status" role="status"></p><p><a href="'+SITE+fitPath+'">Back to SUV Cargo Fit</a> · <a href="'+SITE+'/privacy">Privacy</a></p></main>'+
+    '<script nonce="'+nonce+'">const form=document.getElementById("fit-mail"),note=document.getElementById("fit-status"),button=form.querySelector("button");'+
+    'let fit;try{if(location.hash.startsWith("#fit=")&&location.hash.length<=1600)fit=JSON.parse(decodeURIComponent(location.hash.slice(5)));}catch{}'+
+    'if(fit?.v===1)button.disabled=false;else note.textContent="This shared fit could not be restored. Run a new check to email it.";' +
+    'form.addEventListener("submit",async e=>{e.preventDefault();if(button.disabled)return;const data=new FormData(form),token=data.get("cf-turnstile-response");'+
+    'if(!token){note.textContent="Please complete the verification first.";return;}button.disabled=true;note.textContent="Sending…";'+
+    'try{const r=await fetch(form.action,{method:"POST",headers:{"Content-Type":"application/json"},cache:"no-store",body:JSON.stringify({email:data.get("email"),turnstileToken:token,fit,seasonal:data.get("seasonal")==="on"})});const result=await r.json();'+
+    'if(!r.ok){note.textContent=result.error||"Email could not be sent.";return;}form.hidden=true;note.textContent="Your fit-check email was accepted for delivery."+(result.seasonal==="check_inbox_if_eligible"?" Check your inbox for a separate seasonal confirmation.":result.seasonal==="unavailable"?" The seasonal request could not be completed.":"");'+
+    '}catch{note.textContent="Email service temporarily unavailable. Try again.";}finally{if(!form.hidden){button.disabled=false;window.turnstile?.reset();}}});</script></body></html>';
+  const csp="default-src 'none'; base-uri 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'; script-src 'nonce-"+nonce+"' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; form-action 'self'";
+  return new Response(html,{headers:{...baseHeaders,"Content-Type":"text/html; charset=utf-8","Content-Security-Policy":csp,"X-Robots-Tag":"noindex, nofollow"}});
+}
+
+async function sendFit(request,env){
+  if(!baseReady(env)||!env.FIT_TURNSTILE_SITE_KEY)return respond(503,{ok:false,error:"Fit email service not configured"});
+  const data=await readJSON(request,4096),fit=normalizeFit(data?.fit);
+  const email=typeof data?.email==="string"?data.email.trim().toLowerCase():"";
+  if(!fit||!validEmail(email)||typeof data.seasonal!=="boolean")return respond(400,{ok:false,error:"Invalid fit check or email address"});
+  if(!await verified(request,env,data.turnstileToken,"email_fit",["email.parkmemoir.com"]))return respond(403,{ok:false,error:"Verification failed"});
+  if(!await rate(request,env,"fit",10))return respond(429,{ok:false,error:"Rate limit"});
+  const link=SITE+fitPath+"#fit="+encodeURIComponent(JSON.stringify(fit));
+  const description=vehicleNames[fit.vehicle]+" / "+fitNames[fit.fridge];
+  const text="Your saved SUV cargo fit check: "+fitLabels[fit.result]+"\n"+description+"\n\nReopen the result and its measurements:\n"+link+
+    "\n\nConfirm loading, ventilation and lid swing in the vehicle before buying. This one-time email is separate from seasonal updates.";
+  const key="pm-fit-v1-"+await digest([env.RATE_HASH_SECRET,email,JSON.stringify(fit)].join("|"));
+  const result=await resend(env,"/emails","POST",{from:env.EMAIL_FROM,to:[email],subject:"Your PARKMEMOIR SUV cargo fit check",text},{idempotencyKey:key});
+  if(!result.ok)return respond(502,{ok:false,error:"Provider did not accept email"});
+  let seasonal="not_requested";
+  if(data.seasonal){
+    seasonal="unavailable";
+    try{
+      if(env.SEASONAL_SEGMENT_ID&&env.SEASONAL_TOPIC_ID&&env.RESEND_CONTACTS_API_KEY&&await rate(request,env,"seasonal",6)){
+        const confirmation=await requestSeasonalConsent(env,email,fitPath);
+        if(confirmation.ok)seasonal="check_inbox_if_eligible";
+      }
+    }catch{/* Transactional acceptance is independent of the optional subscription. */}
+  }
+  return respond(200,{ok:true,status:"accepted",seasonal});
+}
+
 async function execute(request,env) {
   const pathname=new URL(request.url).pathname;
+  if(pathname==="/fit-email"&&request.method==="GET")return fitEmailPage(env);
+  if(pathname==="/api/send-fit"){
+    if(request.method!=="POST")return respond(405,{ok:false,error:"Method not allowed"});
+    if(request.headers.get("Origin")!==SERVICE)return respond(403,{ok:false,error:"Origin not allowed"});
+    try{return await sendFit(request,env);}catch{return respond(503,{ok:false,error:"Email service temporarily unavailable"});}
+  }
   if(pathname==="/health" && request.method==="GET") {
     // Binding presence only: no mail, database reads, or private values are exposed.
     const configured=baseReady(env) && Boolean(env.RESEND_CONTACTS_API_KEY&&env.SEASONAL_SEGMENT_ID&&env.SEASONAL_TOPIC_ID&&env.BROWSER?.quickAction);

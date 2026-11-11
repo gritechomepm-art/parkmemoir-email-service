@@ -54,7 +54,12 @@ const consentVersion="pm-seasonal-updates-v1-2026-11-08";
 const emails=[],emailKeys=[],contacts=new Map();let mailFails=false,segmentFails=false,topicFails=false;
 const fakeFetch=async(url,opts={})=>{
   const u=String(url);
-  if(u.includes("challenges.cloudflare.com/turnstile/")){const action=new URLSearchParams(opts.body).get("response")==="plan-token"?"email_plan":"seasonal_signup";return Response.json({success:true,hostname:"parkmemoir.com",action});}
+  if(u.includes("challenges.cloudflare.com/turnstile/")){
+    const token=new URLSearchParams(opts.body).get("response");
+    if(token==="fit-token")return Response.json({success:true,hostname:"email.parkmemoir.com",action:"email_fit"});
+    const action=token==="plan-token"?"email_plan":"seasonal_signup";
+    return Response.json({success:true,hostname:"parkmemoir.com",action});
+  }
   if(!u.startsWith("https://api.resend.com"))throw Error("Unexpected fetch "+u);
   const path=u.slice("https://api.resend.com".length),method=opts.method||"GET",body=opts.body?JSON.parse(opts.body):null;
   assert.equal(opts.headers.Authorization,"Bearer "+(path.startsWith("/contacts")?"CONTACTS_TEST_ONLY":"TEST_ONLY"));
@@ -299,4 +304,70 @@ globalThis.fetch=fakeFetch;
     await cleanupExpired(env);
     assert.equal(db.prepare("SELECT count(*) as n FROM pm_seasonal_rate").get().n>0,true);
   });
+const fitEnv={...env,FIT_TURNSTILE_SITE_KEY:"TEST_SITE_KEY"};
+const fitRequest=(seasonal=false)=>({email:seasonal?"fit-opt-in@example.com":"fit-only@example.com",turnstileToken:"fit-token",seasonal,
+  fit:{v:1,unit:"in",values:{depth:"32.1",width:"42.9",height:"29.3",hatchWidth:"30",hatchHeight:"23",length:"28.5",fridgeWidth:"14.2",fridgeHeight:"14.4",extraLength:"",extraWidth:"",extraHeight:"",openHeight:""},
+  fridge:"t36",vehicle:"crosstrek",references:["depth","width","height"],across:false,power:"c1000",result:"paper-fit"}});
+
+test("fit form is a private GET with unchecked seasonal consent and a distinct challenge action",async()=>{
+  const before=emails.length;
+  const response=await route(new Request(SERVICE+"/fit-email"),fitEnv);
+  const markup=await response.text();
+  assert.equal(response.status,200);
+  assert.match(response.headers.get("Cache-Control"),/no-store/);
+  assert.match(markup,/data-action="email_fit"/);
+  assert.match(markup,/<input type="checkbox" name="seasonal">/);
+  assert.match(markup,/This shared fit could not be restored/);
+  const script=markup.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)[1];
+  assert.doesNotThrow(()=>new Function(script));
+  assert.equal(emails.length,before);
+  assert.equal((await route(new Request(SERVICE+"/fit-email"),env)).status,503);
+});
+test("fit email rejects invalid state, challenge action and wrong origin",async()=>{
+  const before=emails.length;
+  assert.equal((await route(post("/api/send-fit",fitRequest(),SITE),fitEnv)).status,403);
+  assert.equal((await route(post("/api/send-fit",{...fitRequest(),turnstileToken:"plan-token"},SERVICE),fitEnv)).status,403);
+  const bad=fitRequest();bad.fit.values.depth="301";
+  assert.equal((await route(post("/api/send-fit",bad,SERVICE),fitEnv)).status,400);
+  assert.equal(emails.length,before);
+});
+test("fit email restores bounded state, reuses idempotency and never adds a contact without opt-in",async()=>{
+  const before=emails.length,contactCount=contacts.size;
+  for(let n=0;n<2;n++){
+    const response=await route(post("/api/send-fit",fitRequest(),SERVICE,"31.31.31.31"),fitEnv);
+    assert.deepEqual(await response.json(),{ok:true,status:"accepted",seasonal:"not_requested"});
+  }
+  assert.equal(emails.length,before+2);assert.equal(contacts.size,contactCount);
+  assert.equal(emailKeys[before],emailKeys[before+1]);
+  assert.doesNotMatch(emailKeys[before],/fit-only/);
+  assert.match(emails[before].text,/Paper fit/);
+  const link=emails[before].text.split("\n").find(line=>line.startsWith(SITE));
+  const saved=JSON.parse(decodeURIComponent(new URL(link).hash.slice(5)));
+  assert.deepEqual(saved,fitRequest().fit);
+  assert.doesNotMatch(link,/@example/);
+});
+test("fit email saves a compact fridge result with an unchecked tailgate",async()=>{
+  const request=fitRequest();
+  Object.assign(request.fit,{fridge:"mcd15",result:"likely-fit"});
+  Object.assign(request.fit.values,{hatchWidth:"",hatchHeight:"",length:"18.5",fridgeWidth:"12.9",fridgeHeight:"12.6"});
+  const response=await route(post("/api/send-fit",request,SERVICE,"34.34.34.34"),fitEnv);
+  assert.deepEqual(await response.json(),{ok:true,status:"accepted",seasonal:"not_requested"});
+  assert.match(emails.at(-1).text,/Likely fit — verify tailgate.*\n.*BODEGA MCD15/);
+  const link=emails.at(-1).text.split("\n").find(line=>line.startsWith(SITE));
+  assert.deepEqual(JSON.parse(decodeURIComponent(new URL(link).hash.slice(5))),request.fit);
+  request.fit.result="paper-fit";
+  assert.equal((await route(post("/api/send-fit",request,SERVICE),fitEnv)).status,400);
+});
+test("fit opt-in uses the existing double-opt-in and can fail independently",async()=>{
+  const before=emails.length,contactCount=contacts.size;
+  const response=await route(post("/api/send-fit",fitRequest(true),SERVICE,"32.32.32.32"),fitEnv);
+  assert.deepEqual(await response.json(),{ok:true,status:"accepted",seasonal:"check_inbox_if_eligible"});
+  assert.equal(emails.length,before+2);
+  assert.match(emails.at(-1).text,/Confirm your subscription/);
+  assert.equal(contacts.size,contactCount);
+  const consent=db.prepare("SELECT status,source_path FROM pm_seasonal_consent WHERE email=?").get(fitRequest(true).email);
+  assert.equal(consent.status,"pending");assert.match(consent.source_path,/12v-car-fridge/);
+  const noSeason=await route(post("/api/send-fit",fitRequest(true),SERVICE,"33.33.33.33"),{...fitEnv,SEASONAL_TOPIC_ID:""});
+  assert.deepEqual(await noSeason.json(),{ok:true,status:"accepted",seasonal:"unavailable"});
+});
 after(()=>{globalThis.fetch=originally;});
