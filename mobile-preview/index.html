@@ -850,7 +850,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--forest); }
 <div><p class="eyebrow">DEEP DIVE · WINTER OFF-GRID POWER</p>
 <h3>Which winter power station actually fits your setup?</h3>
 <p id="power-guide-explainer">Transfer your selected park, month, days, devices, and confirmed charging assumptions to the Anker comparison.</p></div>
-<a class="button" href="PARKMEMOIR_Anker_Winter_Offers_Preview_V4_1.html" id="anker-guide-link">Find my winter power setup ↗</a>
+<a class="button" href="PARKMEMOIR_Anker_Winter_Offers_Preview_V4_5.html" id="anker-guide-link">Find my winter power setup ↗</a>
 </aside>
 <div class="journal-match-slot" id="journal-match-slot" aria-live="polite"></div>
 </section>
@@ -861,7 +861,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--forest); }
 </div>
 <div class="plan-actions" hidden="" id="plan-actions">
 <div class="action-buttons">
-<button id="copy-plan" type="button">Copy trip link</button>
+<button id="copy-plan" type="button" title="Share a link to reopen and edit your trip options; it is not a PDF">Copy editable trip link</button>
 <button data-print-trip="" id="print-trip" type="button">Save plan + offers (PDF)</button>
 </div>
 <p id="share-status" role="status"></p>
@@ -972,8 +972,13 @@ function attributionContext(){const data={};for(const k of attributionKeys){cons
   const ANKER_PREVIEW_FILE = 'PARKMEMOIR_Anker_Winter_Offers_Preview_V4_5.html';
   const ANKER_LIVE_ROUTE = '/gear/anker-solix-winter-camping-power-guide/';
   function ankerGuideUrl() {
-    const external = window.location.protocol === 'file:' || window.location.pathname.endsWith('PARKMEMOIR_Winter_Parks_Planner_Preview_V12_5.html'); 
-    const url = external ? new URL(ANKER_PREVIEW_FILE, window.location.href) : new URL(ANKER_LIVE_ROUTE, window.location.origin === 'null' ? 'https://parkmemoir.com' : window.location.origin);
+    // Keep reviewed static HTML previews on the same origin; never route a preview host to an unpublished /gear/ path.
+    const previewPage = window.location.protocol === 'file:'
+      || window.location.pathname.includes('/mobile-preview/')
+      || window.location.pathname.includes('/winter-planner-v126/')
+      || window.location.pathname.endsWith('PARKMEMOIR_Winter_Parks_Planner_Preview_V12_5.html');
+    const url = previewPage ? new URL(ANKER_PREVIEW_FILE, window.location.href)
+      : new URL(ANKER_LIVE_ROUTE, window.location.origin === 'null' ? 'https://parkmemoir.com' : window.location.origin);
     const loads = ['basic','laptop','fridge','blanket','kettle'].filter(id => get(id).checked);
     if (get('cpap').checked) loads.push('cpap');
     const translated = loads.map(id => id === 'basic' ? 'phones' : id);
@@ -1141,10 +1146,10 @@ function attributionContext(){const data={};for(const k of attributionKeys){cons
     const local = url.protocol === 'file:';
     try {
       await navigator.clipboard.writeText(url.href);
-      shareStatus.textContent = local ? 'Copied. This link opens this local copy. Use a PDF to share the plan.' : 'Trip link copied.';
+      shareStatus.textContent = local ? 'Copied. This link opens this local copy. Use a PDF to share the plan.' : 'Editable trip link copied.';
       shareUrl.hidden = true;
     } catch {
-      shareStatus.textContent = local ? 'Copy this local link, or use a PDF to share the plan.' : 'Select and copy this trip link.';
+      shareStatus.textContent = local ? 'Copy this local link, or use a PDF to share the plan.' : 'Select and copy your editable trip link.';
       shareUrl.value = url.href;
       shareUrl.hidden = false;
       shareUrl.focus();
