@@ -269,11 +269,12 @@ async function confirm(request,env){
   }
 }
 const fitPath="/gear/12v-car-fridge-suv-fit-power-planner/";
-const fitCore=["depth","width","height","hatchWidth","hatchHeight","length","fridgeWidth","fridgeHeight"];
+const fitCore=["depth","width","height","length","fridgeWidth","fridgeHeight"];
+const fitTailgate=["hatchWidth","hatchHeight"];
 const fitExtra=["extraLength","extraWidth","extraHeight","openHeight"];
-const fitNames={t36:"BODEGA T36","t36-t":"BODEGA T36-T",t50t:"BODEGA T50T",t60:"BODEGA T60",custom:"Custom fridge"};
+const fitNames={t36:"BODEGA T36","t36-t":"BODEGA T36-T",t50t:"BODEGA T50T",t60:"BODEGA T60",mcd15:"BODEGA MCD15",custom:"Custom fridge"};
 const vehicleNames={crosstrek:"2025 Subaru Crosstrek AWD",rav4:"2025 Toyota RAV4 LE",crv:"2025 Honda CR-V",highlander:"2025 Toyota Highlander",sienna:"2025 Toyota Sienna",custom:"Custom vehicle"};
-const fitLabels={"paper-fit":"Paper fit","tight-fit":"Tight fit","unlikely-fit":"Unlikely fit"};
+const fitLabels={"paper-fit":"Paper fit","likely-fit":"Likely fit — verify tailgate","tight-fit":"Tight fit","unlikely-fit":"Unlikely fit"};
 const fitPower=["none","c1000","c2000","c2000-expansion"];
 
 function normalizeFit(s){
@@ -284,13 +285,15 @@ function normalizeFit(s){
     ||s.references.some(key=>!["depth","width","height"].includes(key))
     ||!fitPower.includes(s.power??"none"))return null;
   const values={},limit=s.unit==="in"?300:762;
-  for(const key of [...fitCore,...fitExtra]){
+  for(const key of [...fitCore,...fitTailgate,...fitExtra]){
     const raw=s.values[key],required=fitCore.includes(key);
     if(raw===""&&!required){values[key]="";continue;}
     if(typeof raw!=="string"||raw.length>24||!raw.trim()||!Number.isFinite(Number(raw))
-      ||Number(raw)<0||Number(raw)>limit+1e-8||(required&&Number(raw)===0))return null;
+      ||Number(raw)<0||Number(raw)>limit+1e-8||((required||fitTailgate.includes(key))&&Number(raw)===0))return null;
     values[key]=String(Number(raw));
   }
+  const uncheckedTailgate=fitTailgate.some(key=>values[key]==="");
+  if((s.result==="paper-fit"&&uncheckedTailgate)||(s.result==="likely-fit"&&!uncheckedTailgate))return null;
   return {v:1,unit:s.unit,values,fridge:s.fridge,vehicle:s.vehicle,references:s.references,across:s.across,power:s.power??"none",result:s.result};
 }
 

@@ -346,6 +346,18 @@ test("fit email restores bounded state, reuses idempotency and never adds a cont
   assert.deepEqual(saved,fitRequest().fit);
   assert.doesNotMatch(link,/@example/);
 });
+test("fit email saves a compact fridge result with an unchecked tailgate",async()=>{
+  const request=fitRequest();
+  Object.assign(request.fit,{fridge:"mcd15",result:"likely-fit"});
+  Object.assign(request.fit.values,{hatchWidth:"",hatchHeight:"",length:"18.5",fridgeWidth:"12.9",fridgeHeight:"12.6"});
+  const response=await route(post("/api/send-fit",request,SERVICE,"34.34.34.34"),fitEnv);
+  assert.deepEqual(await response.json(),{ok:true,status:"accepted",seasonal:"not_requested"});
+  assert.match(emails.at(-1).text,/Likely fit — verify tailgate.*\n.*BODEGA MCD15/);
+  const link=emails.at(-1).text.split("\n").find(line=>line.startsWith(SITE));
+  assert.deepEqual(JSON.parse(decodeURIComponent(new URL(link).hash.slice(5))),request.fit);
+  request.fit.result="paper-fit";
+  assert.equal((await route(post("/api/send-fit",request,SERVICE),fitEnv)).status,400);
+});
 test("fit opt-in uses the existing double-opt-in and can fail independently",async()=>{
   const before=emails.length,contactCount=contacts.size;
   const response=await route(post("/api/send-fit",fitRequest(true),SERVICE,"32.32.32.32"),fitEnv);
