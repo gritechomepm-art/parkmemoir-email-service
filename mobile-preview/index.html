@@ -460,6 +460,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--forest); }
 .journal-cover-link{display:block;width:112px;text-decoration:none}
 .journal-cover{display:block;width:112px;height:168px;object-fit:contain;aspect-ratio:2/3;border-radius:4px;background:#fff;box-shadow:0 2px 8px #392a1c1a}
 .journal-match-copy{min-width:0}
+.journal-match-copy h4{font-size:17px;line-height:1.25;margin:6px 0 8px}
+.journal-match-copy .journal-one-liner{font-size:12px;line-height:1.55;margin:4px 0 10px;color:var(--muted)}
+.journal-match-copy .journal-kicker{font-size:10px;letter-spacing:.09em}
 @media(max-width:540px){.journal-match-layout{grid-template-columns:86px minmax(0,1fr);gap:12px}.journal-cover-link,.journal-cover{width:86px}.journal-cover{height:129px}}
 @media print{#print-journal .journal-match-layout{grid-template-columns:58pt minmax(0,1fr);gap:9pt}#print-journal .journal-cover-link,#print-journal .journal-cover{width:58pt}#print-journal .journal-cover{height:87pt;box-shadow:none;break-inside:avoid}}
 
@@ -1293,13 +1296,13 @@ function attributionContext(){const data={};for(const k of attributionKeys){cons
           <img class="journal-cover" src="${escape(coverSrc)}" alt="${escape(book.name+' published paperback cover')}" width="120" height="180" loading="lazy" decoding="async" fetchpriority="low"/>
         </a>
         <div class="journal-match-copy">
-          <span class="journal-kicker">Remember the trip · optional family journal</span>
-          <h4>${escape(book.name)}</h4>
-          <p>Includes ${escape(parkName)} in the ${escape(book.region)} collection. Use ARRIVE, NOTICE, REMEMBER and KEEP to capture family memories after your visit. This journal is optional for every accommodation type.</p>
+          <span class="journal-kicker">Matched family journal</span>
+          <h4>${escape(book.region)}</h4>
+          <p class="journal-one-liner">${escape(parkName)} · ARRIVE · NOTICE · REMEMBER · KEEP</p>
           ${closureNote}
           <div class="journal-actions">
-            ${link(book.href,'View the matching journal')}
-            ${link(book.amazon,'View this book on Amazon')}
+            ${link(book.amazon,'View on Amazon')}
+            ${link(book.href,'Journal details')}
           </div>
         </div>
       </div>
