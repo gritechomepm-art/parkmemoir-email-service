@@ -478,6 +478,26 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--forest); }
 .plan-save-section .action-buttons button{min-height:44px;padding:9px 14px}
 @media (max-width:680px){.planner-left{gap:10px}.plan-save-section{padding:16px;margin-top:18px}.plan-save-section .action-buttons button{width:100%}}
 @media print{.plan-save-section,.journal-match-slot{display:none!important}.print-journal[hidden]{display:none!important}.print-journal .journal-match{margin:12pt 0 0}}
+/* V12.6 PDF: compact journal appears before optional partner offers, on page 1 when it fits.
+   Screen page, affiliate destinations, emailed PDF semantics and backend are unchanged. */
+@media print {
+  #print-plan #print-offers-section { margin:4pt 0 0; break-before:auto; page-break-before:auto; }
+  #print-plan #print-offers-section h2 { margin:5pt 0 3pt; padding-bottom:2pt; }
+  #print-plan #print-journal { margin:3pt 0 5pt; break-inside:avoid; page-break-inside:avoid; }
+  #print-plan #print-journal .journal-match { margin:0!important; padding:5pt 7pt; border-radius:4pt; border:0.6pt solid #bbc7be; break-inside:avoid; page-break-inside:avoid; }
+  #print-plan #print-journal .journal-match-layout { display:grid; grid-template-columns:43pt minmax(0,1fr); gap:8pt; align-items:center; }
+  #print-plan #print-journal .journal-cover-link { width:43pt!important; }
+  #print-plan #print-journal .journal-cover { width:43pt!important; height:64.5pt!important; max-width:43pt!important; object-fit:contain; box-shadow:none; }
+  #print-plan #print-journal .journal-kicker { font-size:7pt; letter-spacing:.03em; }
+  #print-plan #print-journal h4 { font:700 10pt/1.13 Georgia,serif; margin:2pt 0 3pt; }
+  #print-plan #print-journal p { margin:0 0 3pt; font-size:7.7pt; line-height:1.24; }
+  #print-plan #print-journal .journal-actions { display:flex; flex-wrap:wrap; gap:2pt 10pt; }
+  #print-plan #print-journal .journal-actions a { font-size:7.6pt; line-height:1.2; }
+  #print-plan .print-partner-disclosure { margin:0 0 4pt; font-size:7.5pt; line-height:1.3; }
+  #print-plan #print-offers { margin:2pt 0 0; gap:4pt; }
+  #print-plan .print-offer { padding:5pt; }
+  #print-plan .print-link-help { margin:3pt 0 0; font-size:7.5pt; }
+}
 </style></head>
 <body>
 <!-- Preview source: retains noindex; content below is consumer-facing. -->
@@ -880,8 +900,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--forest); }
 <section aria-labelledby="print-offers-heading" id="print-offers-section">
 <h2 id="print-offers-heading">Recommended products &amp; booking links</h2>
 <p class="print-partner-disclosure"><strong>Affiliate disclosure:</strong> PARKMEMOIR may earn a commission if you use the booking or product links below, at no additional cost to you. Recommendations depend on the trip you selected; confirm specifications, prices and availability before purchase.</p>
-<div id="print-offers"></div>
 <section aria-label="Matched family travel journal" class="print-journal" hidden="" id="print-journal"></section>
+<div id="print-offers"></div>
 <p class="print-link-help">Tap or click the underlined links in this PDF. Where shown, scan the QR code from a paper copy.</p>
 </section>
 <div class="print-footer">Recheck road closures and park rules before you leave. More winter planning: <a href="https://parkmemoir.com/which-national-parks-are-open-in-winter/">parkmemoir.com/which-national-parks-are-open-in-winter/</a></div>
