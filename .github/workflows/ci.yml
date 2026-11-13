@@ -22,10 +22,12 @@ jobs:
       - name: Syntax validation
         run: |
           node --check worker.mjs
+          node --check checklist.mjs
+          node --check checklist.test.mjs
           node --check worker.test.mjs
           node --check client/full-print-snapshot.mjs
           node --check client/full-print-snapshot.test.mjs
           node --check scripts/deploy-email-worker.mjs
           node --check scripts/deploy-email-worker.test.mjs
       - name: Mocked email + DOI tests (no credentials)
-        run: node --test worker.test.mjs client/full-print-snapshot.test.mjs scripts/deploy-email-worker.test.mjs
+        run: node --test worker.test.mjs checklist.test.mjs client/full-print-snapshot.test.mjs scripts/deploy-email-worker.test.mjs
