@@ -1,5 +1,7 @@
 # Packing List one-time email and single opt-in — REVIEW ONLY
 
+This PR **reuses the already deployed Winter Parks email infrastructure**: the SAME Resend sender account/domain/keys, SAME `email.parkmemoir.com` Cloudflare Worker and Browser Binding, SAME existing Turnstile widget SITE KEY and secret, and SAME isolated `SUBSCRIBERS` D1 database. No new Cloudflare account, Worker, custom domain, Resend account, DNS records, email credentials, browser binding or Turnstile widget are required. `checklist_send` is only a new action label passed to the existing widget and checked server-side, not a new widget or Dashboard resource. The *one* D1 migration adds a consent audit table inside the existing D1; it does not create a new database. 
+
 This PR is a candidate, not production-ready. **Do not merge** without owner review, D1 migration and live security/provider QA. A merge into main can trigger the independent Worker production deploy workflow.
 
 ## API
@@ -36,7 +38,7 @@ The server validates filter values and item IDs against a fixed catalog and gene
 
 1. Run \`node --check checklist.mjs\` and \`node --test checklist.test.mjs\`, plus existing complete CI. **Draft PR only.**
 2. Apply \`migrations/0002_checklist_direct_consent.sql\` to the isolated email-consent D1 only *before deploying code*; do not alter the existing Winter Planner database or records.
-3. Configure a separate Turnstile front-end action \`checklist_send\` for parkmemoir.com; server secret stays in Worker; do not put secrets in public source. Validate host and action using real Turnstile.
+3. **Reuse the existing Winter Parks Turnstile site key and Worker secret.** The HTML uses the existing widget with the separate action string `checklist_send`; no new site key/widget creation is required. Validate hostname/action using real Turnstile before release; never place the secret in frontend code.
 4. Update the approved Packing List HTML/Next.js page only in a separate website PR, with one email field and one optional unchecked marketing consent checkbox. Change the front-end consentVersion to \`pm-seasonal-updates-v2-direct-2026-11-13\`, use visible checkmarks and include the Turnstile token.
 5. Test controlled inbox one-time PDF, no-contact on unchecked, explicit opt-in on checked, blocked opt-out, failed provider, throttling, failed PDF, mobile and printable content. Validate subscription in Resend Topic/Segment and D1, then test unsubscribe suppression.
 6. Obtain separate permission to merge and deploy. Production worker workflow is auto-triggered on main: **merging is not an innocuous staging action**.
