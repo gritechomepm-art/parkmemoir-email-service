@@ -35,7 +35,7 @@ function setup({blocked=false,existing=false,topicFail=false,emailFail=false,ver
               },
               async run(){
                 if(query.includes("pm_checklist_direct_consent")) {
-                  directRow=query.includes("'confirmed'")?"confirmed":"pending";
+                  directRow=query.includes("VALUES(?,'confirmed'")?"confirmed":"pending";
                 }
                 return {meta:{changes:1}};
               }
