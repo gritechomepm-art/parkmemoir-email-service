@@ -1,3 +1,4 @@
+import {sendChecklist} from "./checklist.mjs";
 // Independent PARKMEMOIR email Worker: never bind private D1/secrets to public marketing Worker.
 const SITE = "https://parkmemoir.com";
 const SERVICE = "https://email.parkmemoir.com";
@@ -273,14 +274,18 @@ async function execute(request,env) {
     return respond(configured?200:503,{ok:configured,service:"parkmemoir-email",status:configured?"configured":"missing_config"});
   }
   if(request.method==="OPTIONS") {
-    if(!ORIGINS.has(request.headers.get("Origin"))||!["/api/send-plan","/api/seasonal-subscribe"].includes(pathname))return respond(403,{ok:false,error:"Origin not allowed"});
+    if(!ORIGINS.has(request.headers.get("Origin"))||!["/api/send-plan","/api/seasonal-subscribe","/api/send-checklist"].includes(pathname))return respond(403,{ok:false,error:"Origin not allowed"});
     return cors(request,new Response(null,{status:204,headers:baseHeaders}));
   }
   if(pathname==="/api/seasonal-confirm")return confirm(request,env);
-  if(!["/api/send-plan","/api/seasonal-subscribe"].includes(pathname))return respond(404,{ok:false,error:"Not found"});
+  if(!["/api/send-plan","/api/seasonal-subscribe","/api/send-checklist"].includes(pathname))return respond(404,{ok:false,error:"Not found"});
   if(request.method!=="POST")return respond(405,{ok:false,error:"Method not allowed"});
   if(!ORIGINS.has(request.headers.get("Origin")))return respond(403,{ok:false,error:"Origin not allowed"});
-  try{return pathname==="/api/send-plan"?await plan(request,env):await subscribe(request,env);}
+  try{
+    if(pathname==="/api/send-checklist")
+      return await sendChecklist(request,env,{baseReady,readJSON,validEmail,verified,rate,resend,digest,now,respond});
+    return pathname==="/api/send-plan"?await plan(request,env):await subscribe(request,env);
+  }
   catch{return respond(503,{ok:false,error:"Email service temporarily unavailable"});}
 }
 export async function route(request,env){
